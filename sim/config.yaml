@@ -1,0 +1,29 @@
+seed: 935408056
+policy_mode: smolvla
+compute:
+  render: auto
+  model: auto
+training:
+  num_workers: 4
+  optimizer_beta1: 0.9
+  optimizer_beta2: 0.95
+  optimizer_eps: 1.0e-8
+  optimizer_weight_decay: 1.0e-10
+  grad_clip_norm: 10
+  scheduler_warmup_steps: 1000
+  scheduler_decay_steps: 1000
+  scheduler_decay_lr: 2.5e-6
+  use_amp: true
+  vision_cache: true
+  vision_cache_gb: 16
+  frame_cache: true
+  frame_cache_gb: 8
+  warmup_fraction: 0.1
+  final_lr_ratio: 0.025
+paths:
+  targets_dir: ../assets/targets
+  distractors_dir: ../assets/objects/models
+  table_textures_dir: ../assets/table
+  rooms_dir: ../assets/rooms
+  robot_xml: ../assets/robot/so_arm100.xml
+  output_dir: output

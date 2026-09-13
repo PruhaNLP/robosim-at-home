@@ -1,0 +1,107 @@
+prompts:
+  templates:
+  - Pick up {target} and place it inside {destination}.
+  destination_templates:
+  - the {tray_color} tray
+target_labels:
+  45oz_RAMEKIN_ASST_DEEP_COLORS:
+  - small ramekin bowl
+  5_HTP:
+  - white supplement bottle with a blue label
+  ACE_Coffee_Mug_Kristen_16_oz_cup:
+  - ceramic coffee mug
+  Android_Figure_Panda:
+  - black and white panda android figure
+  Android_Lego:
+  - green android toy figure
+  BIRD_RATTLE:
+  - colorful bird rattle
+  Breyer_Horse_Of_The_Year_2015:
+  - tan horse figurine
+  BUNNY_RACER:
+  - bunny racer toy
+  BUNNY_RATTLE:
+  - bunny ring rattle
+  CHICKEN_RACER:
+  - wooden chicken racer toy
+  Circo_Fish_Toothbrush_Holder_14995988:
+  - green fish-shaped holder
+  Cole_Hardware_Hammer_Black:
+  - black and yellow rubber mallet
+  Cole_Hardware_School_Bell_Solid_Brass_38:
+  - small brass hand bell
+  Crosley_Alarm_Clock_Vintage_Metal:
+  - round vintage alarm clock
+  Dell_Ink_Cartridge_Yellow_31:
+  - yellow ink cartridge box
+  Diamond_Visions_Scissors_Red:
+  - red-handled scissors
+  DIM_CDG:
+  - white supplement bottle with a pink label
+  Dino_3:
+  - dark dinosaur figure
+  Dino_4:
+  - brown dinosaur figure
+  Dino_5:
+  - gray dinosaur figure
+  FIRE_ENGINE:
+  - red toy fire engine
+  Folic_Acid:
+  - white folic acid bottle
+  Granimals_20_Wooden_ABC_Blocks_Wagon_85VdSftGsLi:
+  - wooden alphabet block
+  Hey_You_Pikachu_Nintendo_64:
+  - Pikachu game box
+  Jansport_School_Backpack_Blue_Streak:
+  - small blue backpack
+  Kong_Puppy_Teething_Rubber_Small_Pink:
+  - pink rubber puppy toy
+  Krill_Oil:
+  - blue krill oil bottle
+  LADYBUG_BEAD:
+  - red ladybug toy
+  Lutein:
+  - white lutein bottle
+  Mastic_Gum:
+  - blue mastic gum bottle
+  My_First_Rolling_Lion:
+  - rolling lion toy
+  My_First_Wiggle_Crocodile:
+  - green crocodile toy
+  Nikon_1_AW1_w11275mm_Lens_Silver:
+  - small silver camera lens
+  Office_Depot_Canon_CL_41_Remanufactured_Ink_Cartridge_TriColor:
+  - white and red ink cartridge box
+  PEEKABOO_ROLLER:
+  - round peekaboo roller toy
+  Perricone_MD_AcylGlutathione_Eye_Lid_Serum:
+  - purple eye serum box
+  Perricone_MD_Blue_Plasma_Orbital:
+  - dark blue cosmetic box
+  Perricone_MD_Chia_Serum:
+  - white chia serum box
+  Pet_Dophilus_powder:
+  - yellow pet supplement bottle
+  Phillips_Stool_Softener_Liquid_Gels_30_liquid_gels:
+  - blue and white medicine box
+  PINEAPPLE_MARACA_6_PCSSET:
+  - yellow pineapple maraca toy
+  Prostate_Optimizer:
+  - dark blue supplement bottle
+  Schleich_Hereford_Bull:
+  - brown and white cow figure
+  SCHOOL_BUS:
+  - yellow school bus toy
+  Shark:
+  - gray shark figure
+  Squirrel:
+  - brown squirrel figure
+  Thomas_Friends_Wooden_Railway_Porter_5JzRhMm3a9o:
+  - small gray toy train
+  Thomas_Friends_Wooden_Railway_Talking_Thomas_z7yi7UFHJRj:
+  - blue Thomas toy train
+  Toysmith_Windem_Up_Flippin_Animals_Dog:
+  - small wind-up dog toy
+  WHALE_WHISTLE_6PCS_SET:
+  - small blue whale whistle
+distractor_labels: {}

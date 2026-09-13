@@ -1,0 +1,1122 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>robosim-at-home</title>
+  <link rel="stylesheet" href="/src/style.css">
+  <script type="importmap">
+    { "imports": { "vue": "/vendor/vue.esm-browser.js" } }
+  </script>
+</head>
+<body>
+  <div id="app" class="app" v-cloak>
+    <header class="app-header">
+      <div class="brand">
+        <span class="mark" :class="{ recording: state.collect.record.recording, busy: state.collect.busy || state.collect.building || state.infer.building || state.test.running || state.train.running || state.grpo.running || state.eval.running || state.eval.building || state.dataset.hub.running }"></span>
+        <strong>robosim-at-home</strong>
+      </div>
+      <nav class="pages">
+        <a href="#collect" :class="{ active: state.page === 'collect' }">Collect data</a>
+        <a href="#datasets" :class="{ active: state.page === 'datasets' }">
+          Datasets
+          <span class="nav-count" v-if="state.dataset.episodes?.length">{{ state.dataset.episodes.length }}</span>
+        </a>
+        <a href="#train" :class="{ active: state.page === 'train' }">Train</a>
+        <a href="#grpo" v-if="!isAct()" :class="{ active: state.page === 'grpo' }">GRPO</a>
+        <a href="#eval" v-if="!isAct()" :class="{ active: state.page === 'eval' }">Eval</a>
+        <a href="#runs" :class="{ active: state.page === 'runs' }">
+          Runs
+          <span class="nav-count" v-if="state.runs.items.length">{{ state.runs.items.length }}</span>
+        </a>
+        <a href="#inference" :class="{ active: state.page === 'inference' }">Inference</a>
+        <a href="#settings" :class="{ active: state.page === 'settings' }">Settings</a>
+      </nav>
+      <div class="header-end">
+        <label class="mode-switch">
+          <span>Mode</span>
+          <select
+            :value="state.config?.policy_mode || 'smolvla'"
+            :disabled="state.train.running || state.grpo.running || state.eval.running || state.eval.building || state.test.running || state.collect.record.recording"
+            @change="setPolicyMode($event.target.value)"
+          >
+            <option value="smolvla">SmolVLA</option>
+            <option value="act">ACT</option>
+          </select>
+        </label>
+        <p class="status">{{ statusText() }}</p>
+      </div>
+    </header>
+
+    <main class="main">
+      <section class="page scene-page" :class="{ hidden: state.page !== 'collect', 'wizard-open': state.collect.step !== 'ready' }">
+        <div class="wizard" v-if="state.collect.step !== 'ready'">
+          <p class="wizard-kicker">Lead arm · {{ state.collect.step }}</p>
+          <h1>{{ collectTitle() }}</h1>
+          <ol class="wizard-steps">
+            <li v-for="(line, index) in state.collect.help" :key="index">{{ line }}</li>
+          </ol>
+          <p class="wizard-copy">{{ state.collect.message || "Follow the steps, then press the button." }}</p>
+          <p class="wizard-meta">
+            USB now:
+            <span v-if="!state.collect.ports.length"> none</span>
+            <span v-for="item in state.collect.ports" :key="item.port"> {{ item.port }}</span>
+          </p>
+          <p v-if="state.collect.candidate" class="wizard-meta">
+            Detected {{ state.collect.candidate.port }}
+            <span v-if="state.collect.candidate.serial"> · {{ state.collect.candidate.serial }}</span>
+          </p>
+          <table class="motor-table" v-if="state.collect.motors.length">
+            <thead>
+              <tr>
+                <th>Motor</th>
+                <th>Min</th>
+                <th>Pos</th>
+                <th>Max</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr v-for="row in state.collect.motors" :key="row.name">
+                <td>{{ row.name }}</td>
+                <td>{{ row.min == null ? "—" : row.min }}</td>
+                <td>{{ row.pos }}</td>
+                <td>{{ row.max == null ? "—" : row.max }}</td>
+              </tr>
+            </tbody>
+          </table>
+          <div class="wizard-actions">
+            <button type="button" class="primary" :disabled="state.collect.busy" @click="wizardNext">
+              {{ state.collect.busy ? "Working…" : wizardLabel() }}
+            </button>
+            <button type="button" :disabled="state.collect.busy" v-if="state.collect.step !== 'idle'" @click="detectLead">
+              Start over
+            </button>
+            <button
+              type="button"
+              :disabled="state.collect.busy || !state.collect.savedCalibration?.match || !state.collect.savedCalibration?.exists"
+              v-if="state.collect.step === 'connected'"
+              @click="useSavedCalibration"
+            >
+              Use saved calibration
+            </button>
+          </div>
+        </div>
+        <template v-else>
+          <div class="scene-bar">
+            <p>{{ state.collect.scene?.instruction || state.collect.saved?.instruction || "Collect" }}</p>
+            <div class="scene-actions" v-if="state.config">
+              <label class="seed">Seed
+                <input
+                  type="number"
+                  step="1"
+                  :value="state.config.seed"
+                  @change="Number($event.target.value) !== state.config.seed && commit(['seed'], Number($event.target.value), 'collect')"
+                >
+              </label>
+              <button type="button" :disabled="state.collect.building || state.collect.record.recording || state.collect.record.stopping || (!state.collect.scene && !state.collect.saved)" @click="resetScene('collect')">
+                Reset
+              </button>
+              <button type="button" class="primary" :disabled="state.collect.building || state.collect.record.recording || state.collect.record.stopping" @click="regenerate('collect')">
+                New scene
+              </button>
+            </div>
+          </div>
+          <div class="test-panel" v-if="state.config">
+            <label class="test-field wide">
+              <span>Dataset</span>
+              <small>Where new episodes are saved.</small>
+              <select
+                v-model="state.collect.record.repoId"
+                :disabled="state.collect.record.recording"
+                @change="selectCollectDataset"
+              >
+                <option v-for="item in state.dataset.items" :key="item.repoId" :value="item.repoId">
+                  {{ item.repoId }}
+                </option>
+              </select>
+            </label>
+            <label class="test-field">
+              <span>Hz</span>
+              <small>Recording, actions, and cameras.</small>
+              <input type="number" min="1" max="30" step="1" v-model.number="state.collect.record.fps" @change="saveCollectSettings">
+            </label>
+            <label class="test-field task">
+              <span>Task</span>
+              <small>{{ isAct() ? "Dataset label only. ACT ignores text." : "Written into the episode. Updates with the scene." }}</small>
+              <textarea v-model="state.collect.record.task" @change="saveCollectSettings"></textarea>
+            </label>
+            <button
+              type="button"
+              class="primary test-run"
+              :disabled="state.collect.building || !state.collect.scene || state.collect.record.stopping"
+              @click="state.collect.record.recording ? stopRecord(true) : startRecord()"
+            >
+              {{ state.collect.record.stopping ? "Saving…" : state.collect.record.recording ? "Stop" : "Record" }}
+            </button>
+            <button
+              type="button"
+              :disabled="!state.collect.record.recording || state.collect.record.stopping"
+              @click="stopRecord(false)"
+            >
+              Discard
+            </button>
+          </div>
+          <div class="scene-body collect-body">
+            <div class="stage" id="collect-stage">
+              <p class="view-stats">{{ state.stats.hz.toFixed(1) }} Hz<span v-if="state.collect.record.recording"> · {{ state.collect.record.frames }} frames</span></p>
+              <div class="camera-grid" id="collect-cameras">
+                <figure
+                  v-for="name in collectCameraNames()"
+                  :key="name"
+                  class="camera"
+                  :data-camera="name"
+                >
+                  <img :alt="name">
+                  <figcaption>{{ name }}</figcaption>
+                </figure>
+              </div>
+              <div v-if="state.collect.overlay" class="overlay" :class="{ error: state.collect.overlayError }">
+                {{ state.collect.overlay }}
+              </div>
+            </div>
+            <aside class="log-chat">
+              <header>Logs</header>
+              <div class="log-list" id="collect-log-list">
+                <p v-if="!state.collect.logs.length" class="log-empty">No logs yet.</p>
+                <p v-for="(line, index) in state.collect.logs" :key="index" :class="'log-' + line.kind">
+                  {{ line.text }}
+                </p>
+              </div>
+            </aside>
+          </div>
+        </template>
+      </section>
+
+      <section class="page datasets-page" :class="{ hidden: state.page !== 'datasets' }">
+        <aside class="settings-nav dataset-sidebar">
+          <button
+            v-for="item in state.dataset.items"
+            :key="item.repoId"
+            type="button"
+            :class="{ active: state.dataset.repoId === item.repoId }"
+            @click="selectDataset(item.repoId)"
+          >
+            <span class="dataset-name">{{ item.repoId }}</span>
+            <small class="dataset-count-badge">{{ item.source === "hub" ? "HF · " : "" }}{{ item.episodes }}</small>
+          </button>
+          <div class="dataset-create">
+            <span class="sidebar-label">New dataset</span>
+            <input type="text" v-model="state.dataset.newId" placeholder="local/so100_collect" :disabled="state.dataset.hub.running">
+            <button type="button" class="primary" :disabled="state.dataset.hub.running" @click="createDataset">Create</button>
+          </div>
+          <div class="dataset-create">
+            <span class="sidebar-label">Hugging Face</span>
+            <input
+              type="text"
+              v-model="state.dataset.hubId"
+              placeholder="org/name"
+              :disabled="state.dataset.hub.running"
+              @keydown.enter.prevent="importHubDataset"
+            >
+            <button type="button" class="primary" :disabled="state.dataset.hub.running" @click="importHubDataset">Add HF</button>
+          </div>
+        </aside>
+        <div class="datasets-body">
+          <header class="settings-head dataset-head">
+            <div class="dataset-title-block">
+              <p class="settings-kicker">Dataset repository</p>
+              <h1>{{ state.dataset.repoId || "No dataset selected" }}</h1>
+              <p class="dataset-desc">{{ isHubDataset() ? "Imported Hugging Face dataset. Inspect episodes, edit tasks, or delete them. Sync discards local changes and downloads the Hub copy again." : "Dataset used for recording episodes. Open an episode to view multi-camera recordings, update the task description, or remove it." }}</p>
+            </div>
+            <div class="dataset-meta-bar" v-if="state.dataset.repoId">
+              <span class="meta-item"><strong>{{ datasetStats().totalEpisodes }}</strong> episodes</span>
+              <span class="meta-item"><strong>{{ datasetStats().totalFrames }}</strong> frames</span>
+              <span class="meta-item"><strong>{{ datasetStats().totalSeconds }}s</strong> total time</span>
+              <button
+                v-if="isHubDataset()"
+                type="button"
+                class="primary"
+                :disabled="state.collect.record.recording || state.dataset.hub.running"
+                @click="syncHubDataset"
+              >
+                Sync from Hub
+              </button>
+              <button type="button" class="danger-btn" :disabled="state.collect.record.recording || state.dataset.hub.running" @click="deleteDataset">
+                Delete dataset
+              </button>
+            </div>
+          </header>
+          <div class="train-monitor hub-import-monitor" v-if="state.dataset.hub.running || state.dataset.hub.error">
+            <div class="train-progress">
+              <div class="train-progress-meta">
+                <span>{{ state.dataset.hub.error || state.dataset.hub.progress?.label || "Importing…" }}</span>
+                <span v-if="state.dataset.hub.repoId">{{ state.dataset.hub.repoId }}</span>
+                <span v-if="state.dataset.hub.progress?.total">{{ state.dataset.hub.progress.current }}/{{ state.dataset.hub.progress.total }}</span>
+                <span>{{ state.dataset.hub.progress?.percent || 0 }}%</span>
+              </div>
+              <div class="train-progress-bar" :class="{ pulse: state.dataset.hub.running && !(state.dataset.hub.progress?.total > 1) }">
+                <i :style="{ width: (state.dataset.hub.progress?.percent || 0) + '%' }"></i>
+              </div>
+            </div>
+            <div class="log-list hub-import-log" v-if="state.dataset.hub.logs?.length">
+              <p v-for="(line, index) in state.dataset.hub.logs.slice(-16)" :key="index" :class="'log-' + line.kind">
+                {{ line.text }}
+              </p>
+            </div>
+          </div>
+          <div class="episode-list">
+            <template v-if="!(state.dataset.hub.running && state.dataset.hub.repoId === state.dataset.repoId)">
+            <div v-if="!state.dataset.episodes.length" class="empty-state-card">
+              <p class="log-empty">{{ isHubDataset() ? "No episodes in this dataset yet." : "No episodes in this dataset yet. Record episodes from the Collect data tab." }}</p>
+            </div>
+            <article
+              v-for="item in state.dataset.episodes"
+              :key="item.id || item.index"
+              class="episode-card"
+              :class="{ open: state.dataset.episode?.id === item.id || (state.dataset.episode?.index === item.index && !state.dataset.episode?.id) }"
+            >
+              <div class="episode-pick" @click="selectEpisode(item)">
+                <div class="episode-badge-col">
+                  <span class="idx-badge">#{{ item.index }}</span>
+                  <span class="id-tag" v-if="item.id">{{ item.id }}</span>
+                </div>
+                <div class="episode-info-col">
+                  <strong class="episode-title">{{ item.task || "untitled task" }}</strong>
+                  <div class="episode-meta-tags">
+                    <span class="meta-pill">{{ item.frames }} frames</span>
+                    <span class="meta-pill">{{ item.seconds }}s</span>
+                    <span class="meta-pill" v-if="item.cameras?.length">{{ item.cameras.length }} cameras</span>
+                  </div>
+                </div>
+                <span class="episode-toggle-btn">
+                  {{ (state.dataset.episode?.id === item.id || (state.dataset.episode?.index === item.index && !state.dataset.episode?.id)) ? "Close" : "Inspect" }}
+                </span>
+              </div>
+              <div v-if="state.dataset.episode?.id === item.id || (state.dataset.episode?.index === item.index && !state.dataset.episode?.id)" class="episode-edit">
+                <div class="episode-videos" v-if="item.cameras?.length">
+                  <div v-for="camera in item.cameras" :key="camera" class="video-container">
+                    <div class="video-label-badge">{{ camera }}</div>
+                    <video :src="episodeVideo(item, camera)" controls preload="metadata"></video>
+                  </div>
+                </div>
+                <label class="task-edit-field">
+                  <span>Task description</span>
+                  <textarea v-model="state.dataset.episode.task" placeholder="Enter task instruction..."></textarea>
+                </label>
+                <div class="episode-card-actions">
+                  <button type="button" class="primary" @click="saveEpisodeTask">Save task</button>
+                  <button type="button" class="danger-btn" @click="deleteEpisode(item.id || item.index)">Delete episode</button>
+                </div>
+              </div>
+            </article>
+            </template>
+          </div>
+        </div>
+      </section>
+
+      <section class="page train-page" :class="{ hidden: state.page !== 'train' }">
+        <div class="scene-bar">
+          <p>{{ isAct() ? "Train ACT from scratch or continue a local / Hugging Face checkpoint." : "Fine-tune SmolVLA from a local or Hugging Face checkpoint." }}</p>
+        </div>
+        <div class="test-panel">
+          <label class="test-field wide">
+            <span>Checkpoint</span>
+            <small>{{ isAct() ? "From scratch, a saved ACT run, or a custom HF / local folder." : "Local run, lerobot/smolvla_base, or a custom HF / local folder." }}</small>
+            <select
+              :value="trainPolicySelect()"
+              :disabled="state.train.running"
+              @change="setTrainPolicySelect($event.target.value)"
+            >
+              <option v-if="isAct()" value="act">act (from scratch)</option>
+              <option v-for="item in trainPolicies()" :key="item.id" :value="item.id">
+                {{ item.label }}
+              </option>
+              <option value="__custom__">Custom HF / path…</option>
+            </select>
+          </label>
+          <label class="test-field wide" v-show="isCustomTrainPolicy()">
+            <span>Source</span>
+            <small>Hugging Face repo (org/name) or a local checkpoint folder.</small>
+            <input
+              type="text"
+              v-model="state.train.customPolicy"
+              placeholder="org/name"
+              :disabled="state.train.running"
+              autocomplete="off"
+              spellcheck="false"
+            >
+          </label>
+          <label class="test-field">
+            <span>Epochs</span>
+            <small>Passes over the converted frames. Steps = epochs × ceil(frames / batch).</small>
+            <input type="number" min="1" step="1" v-model.number="state.train.epochs" :disabled="state.train.running">
+          </label>
+          <label class="test-field">
+            <span>Batch</span>
+            <small>Samples per optimizer step.</small>
+            <input type="number" min="1" step="1" v-model.number="state.train.batch" :disabled="state.train.running">
+          </label>
+          <label class="test-field">
+            <span>LR</span>
+            <small>AdamW peak learning rate.</small>
+            <input type="number" min="0" step="any" v-model.number="state.train.lr" :disabled="state.train.running">
+          </label>
+          <label class="test-field">
+            <span>Save every</span>
+            <small>Checkpoint each N epochs. 0 keeps only the last.</small>
+            <input type="number" min="0" step="1" v-model.number="state.train.saveEvery" :disabled="state.train.running">
+          </label>
+          <label class="test-field wide">
+            <span>Run</span>
+            <small>New folder name under data/train. This is the name that is saved and later shown in GRPO / Inference.</small>
+            <input type="text" v-model="state.train.run" :disabled="state.train.running">
+          </label>
+          <label class="test-field wide" v-if="!isAct()">
+            <span>Tune</span>
+            <small>SmolVLA parts to update.</small>
+            <select v-model="state.train.tune" :disabled="state.train.running">
+              <option value="experts">Experts only</option>
+              <option value="full">Full model</option>
+            </select>
+          </label>
+          <button
+            type="button"
+            class="primary test-run"
+            :disabled="!state.train.running && (!state.train.repoIds.length || !trainPolicyReady() || state.grpo.running)"
+            @click="state.train.running ? stopTrain() : startTrain()"
+          >
+            {{ state.train.running ? "Stop" : "Start" }}
+          </button>
+        </div>
+        <div class="train-monitor" v-show="state.train.progress?.label || state.train.history?.loss?.length">
+          <div class="train-progress" v-if="state.train.progress?.label">
+            <div class="train-progress-meta">
+              <span>{{ state.train.progress.label }}</span>
+              <span v-if="state.train.progress.loss != null">loss {{ formatTrainValue(state.train.progress.loss) }}</span>
+              <span v-if="state.train.progress.lr != null">lr {{ formatTrainValue(state.train.progress.lr) }}</span>
+              <span v-if="state.train.progress.samplesPerS != null">{{ Math.round(state.train.progress.samplesPerS) }} smp/s</span>
+              <span v-if="state.train.progress.etaSeconds != null">ETA {{ formatTrainEta(state.train.progress.etaSeconds) }}</span>
+              <span>{{ state.train.progress.percent }}%</span>
+            </div>
+            <div class="train-progress-bar">
+              <i :style="{ width: state.train.progress.percent + '%' }"></i>
+            </div>
+          </div>
+          <div class="train-charts" v-if="trainCharts().some((chart) => chart.points)">
+            <figure v-for="chart in trainCharts()" :key="chart.id">
+              <figcaption>{{ chart.title }}<em v-if="chart.last != null">{{ formatTrainValue(chart.last) }}</em></figcaption>
+              <svg viewBox="0 0 240 72" preserveAspectRatio="none">
+                <polyline :points="chart.points" fill="none" stroke="currentColor" stroke-width="1.6" />
+              </svg>
+            </figure>
+          </div>
+        </div>
+        <div class="train-body">
+          <aside class="train-pick">
+            <header>Datasets</header>
+            <div class="train-list">
+              <p v-if="!state.dataset.items.length" class="log-empty">No datasets yet.</p>
+              <label
+                v-for="item in state.dataset.items"
+                :key="item.repoId"
+                class="train-item"
+                :class="{ disabled: !item.trainable }"
+              >
+                <input
+                  type="checkbox"
+                  :value="item.repoId"
+                  v-model="state.train.repoIds"
+                  :disabled="state.train.running || !item.trainable"
+                >
+                <span>{{ item.repoId }}</span>
+                <small>{{ item.trainable || 0 }}/{{ item.episodes }} trainable</small>
+              </label>
+            </div>
+          </aside>
+          <aside class="log-chat">
+            <header>Logs</header>
+            <div class="log-list" id="train-log-list">
+              <p v-if="!state.train.logs.length" class="log-empty">Pick a checkpoint and datasets, then start training.</p>
+              <p v-for="(line, index) in state.train.logs" :key="index" :class="'log-' + line.kind">
+                {{ line.text }}
+              </p>
+            </div>
+          </aside>
+        </div>
+      </section>
+
+      <section class="page grpo-page" :class="{ hidden: isAct() || state.page !== 'grpo' }">
+        <div class="scene-bar">
+          <p>{{ state.grpo.scene?.instruction || "Online Flow-SDE GRPO. Loads an SFT checkpoint, rolls out groups in the sim, and updates the flow policy." }}</p>
+        </div>
+        <div class="test-panel">
+          <label class="test-field wide">
+            <span>Checkpoint</span>
+            <small>SFT policy to start from. Saved GRPO runs appear here too.</small>
+            <select v-model="state.grpo.checkpoint" :disabled="state.grpo.running">
+              <option v-for="item in state.test.checkpoints" :key="item.id" :value="item.id">
+                {{ item.label }}
+              </option>
+            </select>
+          </label>
+          <label class="test-field">
+            <span>Run</span>
+            <small>Output folder under data/train.</small>
+            <input type="text" v-model="state.grpo.run" :disabled="state.grpo.running">
+          </label>
+          <label class="test-field">
+            <span>Scope</span>
+            <small>What to train.</small>
+            <select v-model="state.grpo.trainScope" :disabled="state.grpo.running">
+              <option value="experts">Expert only</option>
+              <option value="full_vla">Full VLA</option>
+            </select>
+          </label>
+          <label class="test-field">
+            <span>Group</span>
+            <small>Rollouts per scene.</small>
+            <input type="number" min="2" step="1" v-model.number="state.grpo.groupSize" :disabled="state.grpo.running">
+          </label>
+          <label class="test-field">
+            <span>Time, s</span>
+            <small>Length of one rollout.</small>
+            <input type="number" min="1" step="1" v-model.number="state.grpo.duration" :disabled="state.grpo.running">
+          </label>
+          <label class="test-field slider">
+            <span>Together</span>
+            <small>{{ Number(state.grpo.parallel) <= 1 ? "One after another. Stream one." : Number(state.grpo.parallel) + " inferred at once." }}</small>
+            <input
+              type="range"
+              min="1"
+              :max="Math.max(1, Number(state.grpo.groupSize) || 1)"
+              step="1"
+              v-model.number="state.grpo.parallel"
+              :disabled="state.grpo.running"
+            >
+          </label>
+          <label class="test-field">
+            <span>Scenes / upd</span>
+            <small>Scenes before one GRPO step.</small>
+            <input type="number" min="1" step="1" v-model.number="state.grpo.scenesPerUpdate" :disabled="state.grpo.running">
+          </label>
+          <label class="test-field slider">
+            <span>Waves</span>
+            <small>{{ Number(state.grpo.sceneWaves) <= 1 ? "One scene at a time." : Number(state.grpo.sceneWaves) + " scenes at once." }}</small>
+            <input
+              type="range"
+              min="1"
+              :max="Math.max(1, Number(state.grpo.scenesPerUpdate) || 1)"
+              step="1"
+              v-model.number="state.grpo.sceneWaves"
+              :disabled="state.grpo.running"
+            >
+          </label>
+          <label class="test-field">
+            <span>SDE</span>
+            <small>Where noise is injected.</small>
+            <select v-model="state.grpo.sdeMode" :disabled="state.grpo.running">
+              <option value="one_random_step">One random step</option>
+              <option value="all_steps">All steps</option>
+            </select>
+          </label>
+          <label class="test-field">
+            <span>Noise a</span>
+            <small>SDE strength.</small>
+            <input type="number" min="0" step="any" v-model.number="state.grpo.noiseLevel" :disabled="state.grpo.running">
+          </label>
+          <label class="test-field">
+            <span>Denoise</span>
+            <small>Flow steps.</small>
+            <input type="number" min="1" max="20" step="1" v-model.number="state.grpo.denoisingSteps" :disabled="state.grpo.running">
+          </label>
+          <label class="test-field">
+            <span>Expert LR</span>
+            <small>Action expert AdamW.</small>
+            <input type="number" min="0" step="any" v-model.number="state.grpo.expertLr" :disabled="state.grpo.running">
+          </label>
+          <button
+            type="button"
+            class="primary test-run"
+            :disabled="!state.grpo.running && (!state.grpo.checkpoint || state.train.running)"
+            @click="state.grpo.running ? stopGrpo() : startGrpo()"
+          >
+            {{ state.grpo.running ? "Stop" : "Start GRPO" }}
+          </button>
+        </div>
+        <div class="train-monitor" v-show="state.grpo.progress?.label || grpoCharts().some((chart) => chart.points)">
+          <div class="train-progress" v-if="state.grpo.progress?.label">
+            <div class="train-progress-meta">
+              <span>{{ state.grpo.progress.label }}</span>
+              <span v-if="state.grpo.metrics?.mean_reward != null">reward {{ formatTrainValue(state.grpo.metrics.mean_reward) }}</span>
+              <span v-if="state.grpo.metrics?.success_rate != null">success {{ formatTrainValue(state.grpo.metrics.success_rate) }}</span>
+              <span v-if="state.grpo.progress.etaSeconds != null">ETA {{ formatTrainEta(state.grpo.progress.etaSeconds) }}</span>
+              <span v-if="state.grpo.progress.total">{{ state.grpo.progress.percent }}%</span>
+            </div>
+            <div class="train-progress-bar" v-if="state.grpo.progress.total">
+              <i :style="{ width: state.grpo.progress.percent + '%' }"></i>
+            </div>
+          </div>
+          <div class="train-charts grpo-charts" v-if="grpoCharts().some((chart) => chart.points)">
+            <figure v-for="chart in grpoCharts()" :key="chart.id">
+              <figcaption>{{ chart.title }}<em v-if="chart.last != null">{{ formatTrainValue(chart.last) }}</em></figcaption>
+              <svg viewBox="0 0 240 72" preserveAspectRatio="none">
+                <polyline :points="chart.points" fill="none" stroke="currentColor" stroke-width="1.6" />
+              </svg>
+            </figure>
+          </div>
+        </div>
+        <div class="grpo-body">
+          <div class="stage" id="grpo-stage">
+            <p class="view-stats" v-if="state.grpo.scene">{{ state.stats.hz.toFixed(1) }} Hz · {{ state.stats.frames }} frames</p>
+            <div class="camera-grid" id="grpo-cameras">
+              <figure
+                v-for="name in grpoCameraNames()"
+                :key="name"
+                class="camera"
+                :data-camera="name"
+              >
+                <img :alt="name">
+                <figcaption>{{ name }}</figcaption>
+              </figure>
+            </div>
+            <div v-if="!state.grpo.scene" class="overlay">
+              Start GRPO to generate scenes and stream group rollouts.
+            </div>
+          </div>
+          <aside class="grpo-group">
+            <header>Group</header>
+            <div class="grpo-group-list">
+              <p v-if="!state.grpo.group.length" class="log-empty">No rollouts yet.</p>
+              <article
+                v-for="item in state.grpo.group"
+                :key="item.member"
+                class="grpo-member"
+                :class="{ success: item.success, fail: item.success === false }"
+              >
+                <div class="grpo-member-head">
+                  <strong>#{{ item.member + 1 }}</strong>
+                  <span v-if="item.success">success</span>
+                  <span v-else>fail</span>
+                  <em>{{ formatTrainValue(item.total_reward) }}</em>
+                </div>
+                <div class="grpo-member-bar">
+                  <i :style="{ width: rewardBar(item.total_reward) + '%' }"></i>
+                </div>
+                <p class="grpo-member-meta">
+                  A {{ formatTrainValue(item.advantage) }}
+                  · contact {{ formatTrainValue(item.contact_reward) }}
+                  · prox {{ formatTrainValue(item.proximity_reward) }}
+                  · prog {{ formatTrainValue(item.progress_reward) }}
+                  · grasp {{ formatTrainValue(item.grasp_reward) }}
+                  · win {{ formatTrainValue(item.success_reward) }}
+                  · hit −{{ formatTrainValue(item.impulse_penalty) }}
+                </p>
+              </article>
+            </div>
+          </aside>
+          <aside class="log-chat">
+            <header>Logs</header>
+            <div class="log-list" id="grpo-log-list">
+              <p v-if="!state.grpo.logs.length" class="log-empty">Pick an SFT checkpoint, then start GRPO.</p>
+              <p v-for="(line, index) in state.grpo.logs" :key="index" :class="'log-' + line.kind">
+                {{ line.text }}
+              </p>
+            </div>
+          </aside>
+        </div>
+      </section>
+
+      <section class="page eval-page" :class="{ hidden: isAct() || state.page !== 'eval' }">
+        <div class="scene-bar">
+          <p>Fixed validation scenes. Set the size, build or reroll the set, then batch-evaluate a checkpoint.</p>
+        </div>
+        <div class="test-panel">
+          <label class="test-field">
+            <span>Size</span>
+            <small>How many val scenes to keep.</small>
+            <input type="number" min="1" step="1" v-model.number="state.eval.size" :disabled="state.eval.running || state.eval.building">
+          </label>
+          <label class="test-field">
+            <span>Seed</span>
+            <small>First scene seed. Next scenes are seed+1…</small>
+            <input type="number" step="1" v-model.number="state.eval.seed" :disabled="state.eval.running || state.eval.building">
+          </label>
+          <button
+            type="button"
+            class="primary test-run"
+            :disabled="state.eval.running || state.train.running || state.grpo.running"
+            @click="state.eval.building ? stopEval() : buildEvalSet()"
+          >
+            {{ state.eval.building ? "Stop" : "Build valset" }}
+          </button>
+        </div>
+        <div class="test-panel">
+          <label class="test-field wide">
+            <span>Checkpoint</span>
+            <small>SFT or GRPO policy to score on the valset.</small>
+            <select v-model="state.eval.checkpoint" :disabled="state.eval.running || state.eval.building">
+              <option v-for="item in state.test.checkpoints" :key="item.id" :value="item.id">
+                {{ item.label }}
+              </option>
+            </select>
+          </label>
+          <label class="test-field">
+            <span>Time, s</span>
+            <small>Max length of one scene.</small>
+            <input type="number" min="1" step="1" v-model.number="state.eval.duration" :disabled="state.eval.running || state.eval.building">
+          </label>
+          <label class="test-field slider">
+            <span>Together</span>
+            <small>{{ Number(state.eval.parallel) <= 1 ? "One scene at a time." : Number(state.eval.parallel) + " scenes at once." }}</small>
+            <input
+              type="range"
+              min="1"
+              :max="Math.max(1, Number(state.eval.size) || 1)"
+              step="1"
+              v-model.number="state.eval.parallel"
+              :disabled="state.eval.running || state.eval.building"
+            >
+          </label>
+          <label class="test-field">
+            <span>Denoise</span>
+            <small>ODE flow steps. Same as Inference.</small>
+            <input type="number" min="1" max="20" step="1" v-model.number="state.eval.numSteps" :disabled="state.eval.running || state.eval.building">
+          </label>
+          <label class="test-field">
+            <span>Chunk</span>
+            <small>Actions from each infer.</small>
+            <input type="number" min="1" max="50" step="1" v-model.number="state.eval.nActionSteps" :disabled="state.eval.running || state.eval.building">
+          </label>
+          <button
+            type="button"
+            class="primary test-run"
+            :disabled="!state.eval.running && (state.eval.building || !state.eval.checkpoint || !evalScenes().length || state.train.running || state.grpo.running)"
+            @click="state.eval.running ? stopEval() : startEval()"
+          >
+            {{ state.eval.running ? "Stop" : "Run eval" }}
+          </button>
+        </div>
+        <div class="train-monitor" v-show="state.eval.progress?.label || state.eval.metrics">
+          <div class="train-progress" v-if="state.eval.progress?.label">
+            <div class="train-progress-meta">
+              <span>{{ state.eval.progress.label }}</span>
+              <span v-if="state.eval.metrics?.success_rate != null">success {{ formatTrainValue(state.eval.metrics.success_rate) }}</span>
+              <span v-if="state.eval.metrics?.n_scenes != null">{{ state.eval.metrics.n_success }}/{{ state.eval.metrics.n_scenes }}</span>
+              <span v-if="state.eval.progress.etaSeconds != null">ETA {{ formatTrainEta(state.eval.progress.etaSeconds) }}</span>
+              <span v-if="state.eval.progress.total">{{ state.eval.progress.percent }}%</span>
+            </div>
+            <div class="train-progress-bar" :class="{ pulse: state.eval.building && !(state.eval.progress.total > 1) }">
+              <i :style="{ width: (state.eval.progress.percent || 0) + '%' }"></i>
+            </div>
+          </div>
+        </div>
+        <div class="eval-body">
+          <div class="eval-scenes">
+            <header>Valset <em v-if="evalScenes().length">{{ evalScenes().length }}</em></header>
+            <div class="eval-scene-list">
+              <p v-if="!evalScenes().length" class="log-empty">Set size and seed, then build the valset.</p>
+              <article
+                v-for="item in evalScenes()"
+                :key="item.index"
+                class="eval-scene"
+                :class="{
+                  open: state.eval.selected === item.index,
+                  success: evalSceneResult(item.index)?.success,
+                  fail: evalSceneResult(item.index)?.success === false
+                }"
+                @click="selectEvalScene(item.index)"
+              >
+                <div class="eval-scene-head">
+                  <strong>#{{ item.index + 1 }}</strong>
+                  <span v-if="evalSceneResult(item.index)?.success">success</span>
+                  <span v-else-if="evalSceneResult(item.index)?.success === false">fail</span>
+                  <em>{{ item.target || "scene" }}</em>
+                </div>
+                <p class="eval-scene-copy">{{ item.instruction || "—" }}</p>
+                <p class="eval-scene-meta">seed {{ item.seed }}<template v-if="evalSceneResult(item.index)"> · {{ formatTrainValue(evalSceneResult(item.index).seconds) }}s</template></p>
+              </article>
+            </div>
+          </div>
+          <div class="eval-preview">
+            <header>Scene</header>
+            <div class="eval-preview-body" v-if="evalSelected()">
+              <div class="eval-stills">
+                <figure v-for="name in evalSelected().cameras" :key="name">
+                  <img :src="evalSceneImage(evalSelected(), name)" :alt="name">
+                  <figcaption>{{ name }}</figcaption>
+                </figure>
+              </div>
+              <label class="test-field">
+                <span>Seed</span>
+                <small>Reroll this scene only.</small>
+                <input type="number" step="1" v-model.number="state.eval.rerollSeed" :disabled="state.eval.running || state.eval.building">
+              </label>
+              <button
+                type="button"
+                :disabled="state.eval.running || state.eval.building"
+                @click="rerollEvalScene()"
+              >
+                Reroll scene
+              </button>
+            </div>
+            <p v-else class="log-empty">Pick a scene to inspect stills and reroll it.</p>
+          </div>
+          <aside class="log-chat">
+            <header>Logs</header>
+            <div class="log-list" id="eval-log-list">
+              <p v-if="!state.eval.logs.length" class="log-empty">Build a valset, then run eval.</p>
+              <p v-for="(line, index) in state.eval.logs" :key="index" :class="'log-' + line.kind">
+                {{ line.text }}
+              </p>
+            </div>
+          </aside>
+        </div>
+      </section>
+
+      <section class="page datasets-page runs-page" :class="{ hidden: state.page !== 'runs' }">
+        <aside class="settings-nav dataset-sidebar">
+          <button
+            v-for="item in state.runs.items"
+            :key="item.id"
+            type="button"
+            :class="{ active: state.runs.selected === item.id }"
+            @click="selectRun(item.id)"
+          >
+            <span class="dataset-name">{{ item.id }}</span>
+            <small class="dataset-count-badge">{{ item.kind }}</small>
+          </button>
+          <p v-if="!state.runs.items.length" class="log-empty">No runs yet.</p>
+        </aside>
+        <div class="datasets-body">
+          <header class="settings-head dataset-head">
+            <div class="dataset-title-block">
+              <p class="settings-kicker">{{ state.runs.detail?.kind === 'grpo' ? 'GRPO' : state.runs.detail?.kind === 'sft' ? 'SFT' : 'Run' }}</p>
+              <h1>{{ state.runs.detail?.id || "No run selected" }}</h1>
+              <p class="dataset-desc">Saved SFT and GRPO runs under data/train. Open one to inspect loss and delete the folder.</p>
+            </div>
+            <div class="dataset-meta-bar" v-if="state.runs.detail">
+              <span class="meta-item" v-if="state.runs.detail.lastLoss != null"><strong>{{ formatTrainValue(state.runs.detail.lastLoss) }}</strong> loss</span>
+              <span class="meta-item" v-if="state.runs.detail.lastReward != null"><strong>{{ formatTrainValue(state.runs.detail.lastReward) }}</strong> reward</span>
+              <span class="meta-item" v-if="state.runs.detail.lastSuccess != null"><strong>{{ formatTrainValue(state.runs.detail.lastSuccess) }}</strong> success</span>
+              <span class="meta-item" v-if="state.runs.detail.checkpoints?.length"><strong>{{ state.runs.detail.checkpoints.length }}</strong> checkpoints</span>
+              <span class="meta-item" v-if="state.runs.detail.mtime"><strong>{{ formatRunTime(state.runs.detail.mtime) }}</strong></span>
+              <button
+                type="button"
+                class="danger-btn"
+                :disabled="runBusy(state.runs.detail.id)"
+                @click="deleteRun(state.runs.detail.id)"
+              >
+                Delete run
+              </button>
+            </div>
+          </header>
+          <div class="train-charts" v-if="runCharts().some((chart) => chart.points)">
+            <figure v-for="chart in runCharts()" :key="chart.id">
+              <figcaption>{{ chart.title }}<em v-if="chart.last != null">{{ formatTrainValue(chart.last) }}</em></figcaption>
+              <svg viewBox="0 0 240 72" preserveAspectRatio="none">
+                <polyline :points="chart.points" fill="none" stroke="currentColor" stroke-width="1.6" />
+              </svg>
+            </figure>
+          </div>
+          <p v-else-if="state.runs.detail" class="log-empty">No metrics.jsonl yet. New SFT/GRPO steps will show loss here.</p>
+          <div class="episode-list" v-if="state.runs.detail?.checkpoints?.length">
+            <article v-for="item in state.runs.detail.checkpoints" :key="item.id" class="episode-card">
+              <div class="episode-pick">
+                <div class="episode-info-col">
+                  <strong class="episode-title">{{ item.label }}</strong>
+                  <div class="episode-meta-tags">
+                    <span class="meta-pill" v-if="item.step != null">step {{ item.step }}</span>
+                  </div>
+                </div>
+              </div>
+            </article>
+          </div>
+        </div>
+      </section>
+
+      <section class="page scene-page" :class="{ hidden: state.page !== 'inference' }">
+        <div class="scene-bar">
+          <p>{{ state.infer.scene?.instruction || state.infer.saved?.instruction || "Inference is idle until you create a scene." }}</p>
+          <div class="scene-actions" v-if="state.config">
+            <label class="seed">Seed
+              <input
+                type="number"
+                step="1"
+                :value="state.config.seed"
+                @change="Number($event.target.value) !== state.config.seed && commit(['seed'], Number($event.target.value), 'infer')"
+              >
+            </label>
+            <button type="button" :disabled="state.infer.building || (!state.infer.scene && !state.infer.saved)" @click="resetScene('infer')">
+                Reset
+              </button>
+              <button type="button" class="primary" :disabled="state.infer.building" @click="regenerate('infer')">
+                New scene
+              </button>
+          </div>
+        </div>
+        <div class="test-stack" v-if="state.config && state.infer.scene">
+        <div class="test-panel">
+          <label class="test-field wide">
+            <span>Checkpoint</span>
+            <small>{{ isAct() ? "Trained ACT checkpoint." : "Your inference loop loads this policy." }}</small>
+            <select v-model="state.test.checkpoint" :disabled="state.test.running">
+              <option v-for="item in state.test.checkpoints" :key="item.id" :value="item.id">
+                {{ item.label }}
+              </option>
+            </select>
+          </label>
+          <label class="test-field">
+            <span>Time, s</span>
+            <small>How long the robot may work on this task.</small>
+            <input type="number" min="1" step="1" v-model.number="state.test.duration">
+          </label>
+          <label class="test-field">
+            <span>Chunk</span>
+            <small>Actions taken from each model chunk before the next infer.</small>
+            <input type="number" min="1" max="50" step="1" v-model.number="state.test.nActionSteps">
+          </label>
+          <label class="test-field" v-if="!isAct()">
+            <span>Denoise</span>
+            <small>Flow-matching steps. Fewer is faster, more is stabler.</small>
+            <input type="number" min="1" max="20" step="1" v-model.number="state.test.numSteps">
+          </label>
+          <label class="test-field">
+            <span>Control Hz</span>
+            <small>How often the model and the simulator take a step.</small>
+            <input type="number" min="1" max="50" step="1" v-model.number="state.test.controlHz">
+          </label>
+          <label class="test-field">
+            <span>View FPS</span>
+            <small>MJPEG stream rate for the camera tiles.</small>
+            <input type="number" min="1" max="30" step="1" v-model.number="state.test.viewFps">
+          </label>
+          <button
+            type="button"
+            class="primary test-run"
+            :disabled="state.infer.building || !state.infer.scene || (isAct() && !state.test.checkpoint)"
+            @click="state.test.running ? stopTest() : runTest()"
+          >
+            {{ state.test.running ? "Stop" : "Run test" }}
+          </button>
+        </div>
+        </div>
+        <div class="scene-body">
+          <div class="stage" id="infer-stage">
+            <p class="view-stats" v-if="state.infer.scene">{{ state.stats.hz.toFixed(1) }} Hz · {{ state.stats.frames }} frames</p>
+            <div class="camera-grid" id="infer-cameras">
+              <figure
+                v-for="name in inferCameraNames()"
+                :key="name"
+                class="camera"
+                :data-camera="name"
+              >
+                <img :alt="name">
+                <figcaption>{{ name }}</figcaption>
+              </figure>
+            </div>
+            <div v-if="state.infer.overlay || !state.infer.scene" class="overlay" :class="{ error: state.infer.overlayError }">
+              {{ state.infer.overlay || "Create a scene to run inference." }}
+            </div>
+          </div>
+          <aside class="log-chat">
+            <header>Logs</header>
+            <div class="log-list" id="log-list">
+              <p v-if="!state.logs.length" class="log-empty">No logs yet.</p>
+              <p v-for="(line, index) in state.logs" :key="index" :class="'log-' + line.kind">
+                {{ line.text }}
+              </p>
+            </div>
+          </aside>
+        </div>
+      </section>
+
+      <section class="page settings-page" :class="{ hidden: state.page !== 'settings' }" v-if="state.config">
+        <aside class="settings-nav">
+          <button
+            v-for="item in settingsNav()"
+            :key="item.id"
+            type="button"
+            :class="{ active: state.section === item.id }"
+            @click="state.section = item.id"
+          >
+            {{ item.title }}
+          </button>
+        </aside>
+        <div class="settings-body">
+          <header class="settings-head">
+            <p class="settings-kicker">Settings</p>
+            <h1>{{ settingsNav().find((item) => item.id === state.section)?.title }}</h1>
+            <p>{{ settingsNav().find((item) => item.id === state.section)?.blurb }}</p>
+          </header>
+          <article
+            v-for="group in groupsFor(state.section)"
+            :key="group.id"
+            class="group"
+            :class="{ open: isOpen(state.section, group.id) }"
+          >
+            <button type="button" class="group-title" @click="toggleGroup(state.section, group.id)">
+              {{ group.title }}
+            </button>
+            <div v-show="isOpen(state.section, group.id)" class="group-fields">
+              <template v-for="field in group.fields" :key="field.path.join('.')">
+                <div v-if="field.type === 'object_catalog'" class="field catalog-field">
+                  <span class="field-label">{{ field.label }}</span>
+                  <small>{{ field.help }}</small>
+                  <div class="catalog-toolbar">
+                    <input
+                      type="search"
+                      placeholder="Search"
+                      :value="state.catalogQuery"
+                      @input="state.catalogQuery = $event.target.value"
+                    >
+                    <button type="button" @click="selectCatalogRole('targets', true)">All targets</button>
+                    <button type="button" @click="selectCatalogRole('distractors', true)">All distractors</button>
+                    <span class="catalog-count">{{ catalogSelectedCount('targets') }} targets · {{ catalogSelectedCount('distractors') }} distractors</span>
+                  </div>
+                  <div class="catalog-list">
+                    <div class="catalog-row catalog-head">
+                      <span></span>
+                      <span></span>
+                      <span>Target</span>
+                      <span>Distractor</span>
+                      <span></span>
+                    </div>
+                    <div v-for="item in filteredCatalog(field)" :key="item.id" class="catalog-row">
+                      <img
+                        class="catalog-thumb"
+                        :src="catalogPreview(item.id)"
+                        :alt="item.id"
+                        loading="lazy"
+                      >
+                      <span class="catalog-id">{{ item.id }}</span>
+                      <input
+                        type="checkbox"
+                        :checked="isCatalogChecked('targets', item.id)"
+                        @change="setCatalogChecked('targets', item.id, $event.target.checked)"
+                      >
+                      <input
+                        type="checkbox"
+                        :checked="isCatalogChecked('distractors', item.id)"
+                        @change="setCatalogChecked('distractors', item.id, $event.target.checked)"
+                      >
+                      <input
+                        type="text"
+                        class="catalog-name"
+                        :value="objectLabel(field, item.id)"
+                        @change="setObjectLabel(field, item.id, $event.target.value)"
+                      >
+                    </div>
+                  </div>
+                </div>
+                <label v-else class="field">
+                  <span class="field-label">{{ field.label }}</span>
+                  <small>{{ field.help }}</small>
+                  <select
+                    v-if="field.type === 'bool'"
+                    :value="String(fieldValue(field.path))"
+                    @change="commit(field.path, $event.target.value === 'true')"
+                  >
+                    <option value="true">yes</option>
+                    <option value="false">no</option>
+                  </select>
+                  <select
+                    v-else-if="field.type === 'device'"
+                    :value="String(fieldValue(field.path))"
+                    @change="commit(field.path, $event.target.value)"
+                  >
+                    <option v-for="device in state.devices" :key="device.id" :value="device.id">
+                      {{ device.label }} · {{ device.detail }}
+                    </option>
+                  </select>
+                  <select
+                    v-else-if="field.type === 'model_device'"
+                    :value="String(fieldValue(field.path))"
+                    @change="commit(field.path, $event.target.value)"
+                  >
+                    <option v-for="device in state.modelDevices" :key="device.id" :value="device.id">
+                      {{ device.label }} · {{ device.detail }}
+                    </option>
+                  </select>
+                  <select
+                    v-else-if="field.type === 'select'"
+                    :value="String(fieldValue(field.path))"
+                    @change="commit(field.path, $event.target.value)"
+                  >
+                    <option v-for="option in field.options" :key="option.value" :value="option.value">
+                      {{ option.label }}
+                    </option>
+                  </select>
+                  <input
+                    v-else-if="field.type === 'number'"
+                    type="number"
+                    step="any"
+                    :value="fieldValue(field.path)"
+                    @input="commitNumber(field.path, $event.target.value)"
+                  >
+                  <input
+                    v-else-if="field.type === 'string'"
+                    type="text"
+                    :value="fieldValue(field.path) ?? ''"
+                    @change="commit(field.path, $event.target.value.trim())"
+                  >
+                  <textarea
+                    v-else-if="field.type === 'string_list'"
+                    :value="(fieldValue(field.path) || []).join('\n')"
+                    @change="commit(field.path, $event.target.value.split('\n').map((line) => line.trim()).filter(Boolean))"
+                  ></textarea>
+                  <div v-else-if="field.type === 'policy_map'" class="policy-map">
+                    <div
+                      v-for="slot in policyMapSlots()"
+                      :key="slot"
+                      class="policy-cam-row"
+                      :class="{ on: Boolean(policyMapSlot(slot)) }"
+                    >
+                      <span class="policy-cam-slot">{{ slot }}</span>
+                      <select
+                        :value="policyMapSlot(slot)"
+                        @change="setPolicyMapSlot(slot, $event.target.value)"
+                      >
+                        <option value="">— empty</option>
+                        <option
+                          v-for="name in policyMapChoices(slot)"
+                          :key="name"
+                          :value="name"
+                        >{{ name }}</option>
+                      </select>
+                    </div>
+                  </div>
+                  <div v-else-if="['range', 'vec2', 'vec3'].includes(field.type)" class="row" :class="field.type">
+                    <input
+                      v-for="(_, index) in fieldValue(field.path)"
+                      :key="index"
+                      type="number"
+                      step="any"
+                      :value="fieldValue(field.path)[index]"
+                      @input="updateIndex(field.path, index, $event.target.value)"
+                    >
+                  </div>
+                  <div v-else-if="field.type === 'vec3_list'" class="vec3-list">
+                    <div v-for="(row, rowIndex) in vec3List(field.path)" :key="rowIndex" class="vec3-list-row">
+                      <input
+                        v-for="col in 3"
+                        :key="col"
+                        type="number"
+                        step="any"
+                        :value="row[col - 1]"
+                        @input="updateVec3List(field.path, rowIndex, col - 1, $event.target.value)"
+                      >
+                      <button type="button" @click="removeVec3(field.path, rowIndex)">Remove</button>
+                    </div>
+                    <button type="button" @click="addVec3(field.path)">Add position</button>
+                  </div>
+                </label>
+              </template>
+            </div>
+          </article>
+        </div>
+      </section>
+    </main>
+  </div>
+  <script type="module" src="/src/main.js"></script>
+</body>
+</html>

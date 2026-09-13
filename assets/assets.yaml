@@ -1,0 +1,26 @@
+pack: demo
+paths:
+  robot: robot/so_arm100.xml
+  rooms: rooms
+  table: table
+  objects: objects/models
+counts:
+  rooms: 1
+  table: 1
+  objects: 6
+sources:
+  rooms: https://polyhaven.com (CC0)
+  table: https://polyhaven.com (CC0)
+  objects: Google Scanned Objects (CC-BY-4.0)
+  robot: https://github.com/google-deepmind/mujoco_menagerie (Apache-2.0)
+rooms:
+  - reading_room
+table:
+  - wood_wood_table_001.jpg
+objects:
+  - BABY_CAR
+  - BIA_Porcelain_Ramekin_With_Glazed_Rim_35_45_oz_cup
+  - Closetmaid_Premium_Fabric_Cube_Red
+  - HAMMER_BALL
+  - Krill_Oil
+  - Olive_Kids_Birdie_Lunch_Box

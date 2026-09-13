@@ -1,0 +1,23 @@
+impulse:
+  max_penalty: 0.25
+  normalization_percentile: 90
+  include_target_to_distractor: true
+target_contact:
+  max_seconds: 2
+  max_reward: 0.15
+target_proximity:
+  decay_distance_m: 0.15
+  max_seconds: 20
+  max_reward: 0.1
+progress:
+  max_reward: 0.25
+grasp:
+  required_contact_seconds: 0.35
+  loss_reset_seconds: 0.4
+  reward_per_grasp: 0.3
+  max_reward: 0.3
+success:
+  base_reward: 2
+  max_speed_bonus: 0.1
+  stable_seconds: 0.8
+  max_linear_speed_m_s: 0.04

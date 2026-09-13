@@ -1,0 +1,17 @@
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+
+data/
+sim/output/
+train_loop/results/
+model/logs/
+
+assets/*
+!assets/README.md
+!assets/assets.yaml
+
+*.tar.gz
+.env
+.cursor/

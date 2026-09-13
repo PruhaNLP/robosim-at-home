@@ -1,0 +1,75 @@
+rollout:
+  checkpoint: null
+  device: cpu
+  scene_count: 3
+  rollouts_per_scene: 8
+  duration_seconds: 40
+  control_hz: 15
+  actions_are_degrees: true
+  camera_width: 512
+  camera_height: 512
+  log_every_steps: 15
+  output_dir: output/rollouts
+preview:
+  render_width: 512
+  render_height: 512
+  gallery_scenes: 8
+  host: 127.0.0.1
+  port: 8000
+  stream_fps: 25
+  stream_jpeg_quality: 85
+  pause_between_rollouts_seconds: 0.5
+  pause_between_scenes_seconds: 1
+grpo:
+  checkpoint: null
+  output_dir: null
+  device: auto
+  train_scope: experts
+  group_size: 16
+  parallel_rollouts: 16
+  scenes_per_update: 16
+  scene_waves: 4
+  max_updates: null
+  clip_eps: 0.2
+  kl_coef: 0.18
+  n_action_steps: 50
+  flow:
+    denoising_steps: 10
+    noise_level: 0.35
+    sde_mode: one_random_step
+    flow_scale:
+      enabled: true
+      power: 0.5
+      uniform_mix: 0.5
+      min_weight: 0.5
+      max_weight: 1.5
+  optimization:
+    vlm_learning_rate: !!float '1e-06'
+    action_expert_learning_rate: !!float '5e-06'
+    weight_decay: 0.01
+    adam_beta1: 0.9
+    adam_beta2: 0.95
+    adam_eps: !!float '1e-08'
+    update_microbatch_full_vla: 1
+    update_microbatch_expert_only: 8
+    rollout_inference_microbatch: 8
+    max_grad_norm: 1
+  checkpointing:
+    save_every_scenes: 20
+    keep_last: 5
+    keep_optimizer: true
+  visualization:
+    enabled: true
+    stream_fps: 15
+  smoke:
+    enabled: false
+    scenes_per_update: 1
+    group_size: 2
+    duration_seconds: 1
+eval:
+  size: 32
+  seed: 10000
+  duration_seconds: 40
+  parallel: 8
+  n_action_steps: 50
+  denoising_steps: 10

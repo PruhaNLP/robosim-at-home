@@ -1,0 +1,37 @@
+name: robosim-at-home
+
+services:
+  robosim-at-home:
+    build: .
+    image: robosim-at-home:local
+    ports:
+      - "${ROBOSIM_PORT:-8000}:8000"
+    privileged: true
+    group_add:
+      - dialout
+    volumes:
+      - ./ui:/app/ui
+      - ./model:/app/model
+      - ./grpo:/app/grpo
+      - ./eval:/app/eval
+      - ./sim:/app/sim
+      - ./train_loop:/app/train_loop
+      - ./data:/app/data
+      - ./assets:/app/assets
+      - /dev:/dev
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]
+    shm_size: "8gb"
+    environment:
+      MUJOCO_GL: ${MUJOCO_GL:-egl}
+      NVIDIA_VISIBLE_DEVICES: all
+      NVIDIA_DRIVER_CAPABILITIES: compute,utility,graphics
+      ROBOSIM_DATA_DIR: data
+      HF_HOME: data/cache/huggingface
+      HUGGINGFACE_HUB_CACHE: data/cache/huggingface/hub
+    restart: "no"
