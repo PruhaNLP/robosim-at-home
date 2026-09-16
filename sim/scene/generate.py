@@ -1,3 +1,4 @@
+import gc
 import json
 import math
 import os
@@ -418,85 +419,90 @@ def generate(
 
     model = mujoco.MjModel.from_xml_path(str(scene_xml))
     data = mujoco.MjData(model)
-    mujoco.mj_resetData(model, data)
-    home_key = mujoco.mj_name2id(
-        model,
-        mujoco.mjtObj.mjOBJ_KEY,
-        "home",
-    )
-    if home_key >= 0:
-        data.qpos[:6] = model.key_qpos[home_key, :6]
-        data.ctrl[:6] = model.key_ctrl[home_key, :6]
-        mujoco.mj_forward(model, data)
-    settle_steps = round(
-        float(config["scene"]["settle_seconds"]) / model.opt.timestep
-    )
-    if settle_steps:
-        mujoco.mj_step(model, data, nstep=settle_steps)
-
-    if write_previews:
-        camera_profiles = render_cameras(
+    try:
+        mujoco.mj_resetData(model, data)
+        home_key = mujoco.mj_name2id(
             model,
-            data,
-            output_dir,
-            config,
-            camera_names,
-            camera_profiles,
-            rng,
+            mujoco.mjtObj.mjOBJ_KEY,
+            "home",
         )
+        if home_key >= 0:
+            data.qpos[:6] = model.key_qpos[home_key, :6]
+            data.ctrl[:6] = model.key_ctrl[home_key, :6]
+            mujoco.mj_forward(model, data)
+        settle_steps = round(
+            float(config["scene"]["settle_seconds"]) / model.opt.timestep
+        )
+        if settle_steps:
+            mujoco.mj_step(model, data, nstep=settle_steps)
 
-    settled_positions = {}
-    for scene_object in scene_objects:
-        body_id = mujoco.mj_name2id(
-            model,
-            mujoco.mjtObj.mjOBJ_BODY,
-            scene_object.body_name,
+        if write_previews:
+            camera_profiles = render_cameras(
+                model,
+                data,
+                output_dir,
+                config,
+                camera_names,
+                camera_profiles,
+                rng,
+            )
+
+        settled_positions = {}
+        for scene_object in scene_objects:
+            body_id = mujoco.mj_name2id(
+                model,
+                mujoco.mjtObj.mjOBJ_BODY,
+                scene_object.body_name,
+            )
+            settled_positions[scene_object.body_name] = np.asarray(
+                data.xpos[body_id]
+            ).tolist()
+        prompt_metadata = {
+            "target": target_dir.name,
+            "appearance": appearance,
+        }
+        metadata = {
+            "seed": seed,
+            "instruction": generate_prompt(prompt_metadata, config, rng),
+            "target": target_dir.name,
+            "distractors": [
+                path.name for path in selected_distractors
+            ],
+            "room": room_dir.name if room_dir is not None else None,
+            "room_skybox": (
+                xml_path(room_dir / "skybox.png", output_dir)
+                if room_dir is not None
+                else None
+            ),
+            "table_size_m": table_size.tolist(),
+            "spawn_area_size_m": spawn_area_size.tolist(),
+            "spawn_area_center_xy_m": spawn_area_center.tolist(),
+            "tray": {
+                **tray_dimensions,
+                "center_xy": tray_center.tolist(),
+            },
+            "appearance": appearance,
+            "table_texture_source": xml_path(table_texture_source, output_dir),
+            "lights": lights,
+            "cameras": camera_names,
+            "camera_profiles": camera_profiles,
+            "control_hz": float(config["environment"]["rollout"]["control_hz"]),
+            "gravity_m_s2": gravity,
+            "robot_physics_multipliers": robot_physics_scales,
+            "objects": [
+                asdict(scene_object) for scene_object in scene_objects
+            ],
+            "settled_positions": settled_positions,
+            "object_physics_note": (
+                "GSO has no measured mass/friction; configured nominal "
+                "estimates are randomized by ±5%."
+            ),
+        }
+        (output_dir / "metadata.json").write_text(
+            json.dumps(metadata, indent=2)
         )
-        settled_positions[scene_object.body_name] = np.asarray(
-            data.xpos[body_id]
-        ).tolist()
-    prompt_metadata = {
-        "target": target_dir.name,
-        "appearance": appearance,
-    }
-    metadata = {
-        "seed": seed,
-        "instruction": generate_prompt(prompt_metadata, config, rng),
-        "target": target_dir.name,
-        "distractors": [
-            path.name for path in selected_distractors
-        ],
-        "room": room_dir.name if room_dir is not None else None,
-        "room_skybox": (
-            xml_path(room_dir / "skybox.png", output_dir)
-            if room_dir is not None
-            else None
-        ),
-        "table_size_m": table_size.tolist(),
-        "spawn_area_size_m": spawn_area_size.tolist(),
-        "spawn_area_center_xy_m": spawn_area_center.tolist(),
-        "tray": {
-            **tray_dimensions,
-            "center_xy": tray_center.tolist(),
-        },
-        "appearance": appearance,
-        "table_texture_source": xml_path(table_texture_source, output_dir),
-        "lights": lights,
-        "cameras": camera_names,
-        "camera_profiles": camera_profiles,
-        "control_hz": float(config["environment"]["rollout"]["control_hz"]),
-        "gravity_m_s2": gravity,
-        "robot_physics_multipliers": robot_physics_scales,
-        "objects": [
-            asdict(scene_object) for scene_object in scene_objects
-        ],
-        "settled_positions": settled_positions,
-        "object_physics_note": (
-            "GSO has no measured mass/friction; configured nominal "
-            "estimates are randomized by ±5%."
-        ),
-    }
-    (output_dir / "metadata.json").write_text(
-        json.dumps(metadata, indent=2)
-    )
-    return metadata
+        return metadata
+    finally:
+        del data
+        del model
+        gc.collect()

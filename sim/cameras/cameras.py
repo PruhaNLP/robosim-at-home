@@ -74,8 +74,10 @@ class SharedRenderer:
 
     def rebind(self, model: mujoco.MjModel) -> None:
         with self.lock:
-            if self.renderer is not None:
-                self.renderer.close()
+            old_renderer = self.renderer
+            old_model = self.model
+            if old_renderer is not None:
+                old_renderer.close()
             self.model = model
             self._camera_ids = {}
             self.renderer = mujoco.Renderer(
@@ -83,6 +85,7 @@ class SharedRenderer:
                 height=self.height,
                 width=self.width,
             )
+        del old_renderer, old_model
 
     def close(self) -> None:
         if self.renderer is not None:

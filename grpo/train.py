@@ -1,6 +1,7 @@
 """Online Flow-SDE GRPO loop: scene → group rollouts → GRPO update."""
 from __future__ import annotations
 
+import gc
 import json
 import queue
 import shutil
@@ -406,6 +407,11 @@ def run_grpo(
         next_seed += 1
     pools: list[tuple] = []
 
+    def _release_update() -> None:
+        gc.collect()
+        if device.type == "cuda":
+            torch.cuda.empty_cache()
+
     def _bind_pool(slot: int, scene_path: Path, metadata: dict):
         seeds = [int(metadata["seed"]) + index for index in range(pool_n)]
         if slot >= len(pools):
@@ -469,19 +475,23 @@ def run_grpo(
                     )
                 )
             t_roll = time.perf_counter()
-            wave_groups = collect_scene_wave(
-                packs,
-                actor,
-                config["reward"],
-                n_action_steps,
-                group_size,
-                llm_log_path,
-                hooks.should_stop,
-                on_preview=_preview if preview_on else None,
-                on_log=hooks.log,
-                wave_size=parallel,
-                preview_hz=float(vis.get("stream_fps") or 15),
-            )
+            try:
+                wave_groups = collect_scene_wave(
+                    packs,
+                    actor,
+                    config["reward"],
+                    n_action_steps,
+                    group_size,
+                    llm_log_path,
+                    hooks.should_stop,
+                    on_preview=_preview if preview_on else None,
+                    on_log=hooks.log,
+                    wave_size=parallel,
+                    preview_hz=float(vis.get("stream_fps") or 15),
+                )
+            finally:
+                for scene_path, _ in items:
+                    shutil.rmtree(scene_path, ignore_errors=True)
             roll_s = time.perf_counter() - t_roll
             if not any(wave_groups):
                 break
@@ -504,6 +514,9 @@ def run_grpo(
         keep = [i for i, group in enumerate(groups) if any(item.success for item in group)]
         if not keep:
             hooks.log("No successful groups, skip update.", "warn")
+            groups = None
+            flat_groups = None
+            _release_update()
             continue
         if len(keep) < len(groups):
             hooks.log(f"Drop {len(groups) - len(keep)}/{len(groups)} groups with 0 success.")
@@ -533,6 +546,12 @@ def run_grpo(
         n_chunks = len(obs_all)
         if n_chunks == 0:
             hooks.log("No chunks in this update, skip.", "warn")
+            groups = None
+            flat_groups = None
+            obs_all = None
+            sde_all = None
+            adv_parts = None
+            _release_update()
             continue
 
         if hooks.progress is not None:
@@ -584,6 +603,14 @@ def run_grpo(
             mag_sum += float(out.loss_mag)
             n_mb += 1
         if hooks.should_stop():
+            groups = None
+            flat_groups = None
+            obs_all = None
+            sde_all = None
+            adv_parts = None
+            adv_all = None
+            ref_cache = None
+            _release_update()
             break
         grad_norm = float(
             torch.nn.utils.clip_grad_norm_(trainable, float(opt["max_grad_norm"]))
@@ -634,6 +661,14 @@ def run_grpo(
             (step_dir / ITER_NAME).write_text(f"{update}\n")
             _trim_checkpoints(ckpt_root, int(ckpt.get("keep_last") or 3))
             hooks.log(f"Saved {step_dir}.")
+        groups = None
+        flat_groups = None
+        obs_all = None
+        sde_all = None
+        adv_parts = None
+        adv_all = None
+        ref_cache = None
+        _release_update()
     finally:
         prefetch.close()
         for renderers, envs in pools:
@@ -641,4 +676,7 @@ def run_grpo(
                 env.close()
             for renderer in renderers or []:
                 renderer.close()
+        gc.collect()
+        if device.type == "cuda":
+            torch.cuda.empty_cache()
     hooks.log("GRPO stopped.")

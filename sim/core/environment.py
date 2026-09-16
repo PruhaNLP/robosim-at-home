@@ -1,3 +1,4 @@
+import gc
 import json
 import os
 from pathlib import Path
@@ -76,12 +77,24 @@ def retarget_scene_envs(
     sensor_seeds: list[int] | None = None,
 ) -> None:
     scene_dir = Path(scene_dir).resolve()
+    old_models = []
+    seen = set()
+    old_datas = []
+    old_trackers = []
+    for env in envs:
+        if id(env.model) not in seen:
+            seen.add(id(env.model))
+            old_models.append(env.model)
+        old_datas.append(env.data)
+        old_trackers.append(env.reward_tracker)
     model = load_scene_model(scene_dir)
     for renderer in _unique_renderers(envs):
         renderer.rebind(model)
     seeds = list(sensor_seeds) if sensor_seeds is not None else [0] * len(envs)
     for env, sensor_seed in zip(envs, seeds, strict=True):
         env.reload(scene_dir, model=model, renderer=env.renderer, sensor_seed=sensor_seed)
+    del old_datas, old_trackers, old_models
+    gc.collect()
 
 
 class RandomSceneEnv:
@@ -135,12 +148,16 @@ class RandomSceneEnv:
         renderer: SharedRenderer | None = None,
         sensor_seed: int | None = None,
     ) -> None:
+        old_data = self.data
+        old_tracker = self.reward_tracker
         self.scene_dir = Path(scene_dir).resolve()
         self.scene_metadata = json.loads(
             (self.scene_dir / "metadata.json").read_text()
         )
         self.model = model or load_scene_model(self.scene_dir)
         self.data = mujoco.MjData(self.model)
+        self.reward_tracker = None
+        del old_data, old_tracker
         if sensor_seed is not None:
             self.sensor_rng = np.random.default_rng(sensor_seed)
         override_hz = self.rollout_config.get("control_hz")
@@ -160,7 +177,6 @@ class RandomSceneEnv:
         self.camera_last_capture = {
             name: float("-inf") for name in self.camera_names
         }
-        self.reward_tracker = None
         if renderer is not None:
             self.renderer = renderer
             self._owns_renderer = False
@@ -363,3 +379,7 @@ class RandomSceneEnv:
     def close(self) -> None:
         if self._owns_renderer:
             self.renderer.close()
+        self.reward_tracker = None
+        self.camera_cache.clear()
+        self.data = None
+        self.model = None

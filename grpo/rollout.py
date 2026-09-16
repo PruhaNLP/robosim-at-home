@@ -153,6 +153,9 @@ class _StreamPump:
             except queue.Full:
                 pass
         self._thread.join(timeout=5.0)
+        self._env = None
+        self._model = None
+        self._on_preview = None
 
     def _run(self) -> None:
         import mujoco
