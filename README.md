@@ -8,11 +8,11 @@ From teleop collection to reinforcement learning, one browser app covers the ent
 robosim
 ```
 
-First launch downloads an asset pack, the demo ACT / SmolVLA checkpoints, and a 100-episode pick-and-place dataset, then opens [http://127.0.0.1:8000](http://127.0.0.1:8000).
+First launch downloads an asset pack, the demo ACT / SmolVLA / TurboVLA checkpoints, and a 100-episode pick-and-place dataset, then opens [http://127.0.0.1:8000](http://127.0.0.1:8000).
 
 > [!NOTE]
 > **Updates**
-> - **2026-09-30** — [TurboVLA](https://arxiv.org/abs/2607.27205) mode (train / inference / eval) with the [PruhaNLP/TurboVLA-base](https://huggingface.co/PruhaNLP/TurboVLA-base) checkpoint.
+> - **2026-09-30** — [TurboVLA](https://arxiv.org/abs/2607.27205) mode (train / inference / eval) with the [PruhaNLP/TurboVLA-base](https://huggingface.co/PruhaNLP/TurboVLA-base) checkpoint and a [blue krill demo](https://huggingface.co/PruhaNLP/TurboVLA-pickplace-blue-krill-demo).
 > - **2026-09-16** — GRPO and scene generation no longer leak RAM / VRAM on long runs.
 
 ---
@@ -63,6 +63,7 @@ Both packs also pull:
 
 - [PruhaNLP/SmolVLA-pickplace-blue-krill-demo](https://huggingface.co/PruhaNLP/SmolVLA-pickplace-blue-krill-demo)
 - [PruhaNLP/ACT-pickplace-blue-krill-demo](https://huggingface.co/PruhaNLP/ACT-pickplace-blue-krill-demo)
+- [PruhaNLP/TurboVLA-pickplace-blue-krill-demo](https://huggingface.co/PruhaNLP/TurboVLA-pickplace-blue-krill-demo)
 - [PruhaNLP/pickplace-blue-krill-demo](https://huggingface.co/datasets/PruhaNLP/pickplace-blue-krill-demo)
 
 [PruhaNLP/TurboVLA-base](https://huggingface.co/PruhaNLP/TurboVLA-base) (~0.9 GB) is fetched on the first TurboVLA training run.

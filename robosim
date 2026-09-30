@@ -70,6 +70,18 @@ STARTER_POLICIES = (
             "stats.safetensors",
         ),
     },
+    {
+        "title": "Demo TurboVLA",
+        "repo": "PruhaNLP/TurboVLA-pickplace-blue-krill-demo",
+        "dir": DATA_DIR / "train" / "turbovla-demo" / "checkpoints" / "011496" / "pretrained_model",
+        "files": (
+            "config.json",
+            "model.safetensors",
+            "stats.safetensors",
+            "tokenizer.json",
+            "tokenizer_config.json",
+        ),
+    },
 )
 STARTER_DATASET = {
     "title": "Demo dataset",
