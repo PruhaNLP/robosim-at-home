@@ -215,10 +215,13 @@ class FlowSdePolicy(nn.Module):
 def load_engine(source: str, device: torch.device, on_log=None, cameras=None):
     from model.act import is_act_checkpoint
     from model.inference import SmolVLAEngine
+    from model.turbovla import is_turbovla_checkpoint
 
     resolved = resolve_checkpoint(source)
     if is_act_checkpoint(resolved):
         raise RuntimeError("GRPO does not support ACT checkpoints.")
+    if is_turbovla_checkpoint(resolved):
+        raise RuntimeError("GRPO does not support TurboVLA checkpoints.")
     engine = SmolVLAEngine(device=str(device))
     engine.load(source=resolved, on_log=on_log, cameras=cameras, warmup=False)
     return engine, resolved

@@ -79,8 +79,8 @@ class GrpoRuntime:
 
     def start(self, payload: dict, compute: dict, config: dict, preview, worker=None) -> dict:
         mode = normalize_policy_mode(payload.get("policy_mode") or config.get("policy_mode"))
-        if mode == "act":
-            raise RuntimeError("GRPO is not available in ACT mode.")
+        if mode != "smolvla":
+            raise RuntimeError(f"GRPO is not available in {mode} mode.")
         with self.lock:
             if self.running:
                 raise RuntimeError("GRPO is already running")

@@ -361,7 +361,7 @@ def ensure_data_dirs() -> None:
 
 def normalize_policy_mode(value) -> str:
     raw = str(value or "").strip().lower()
-    if raw in ("act", "smolvla"):
+    if raw in ("act", "smolvla", "turbovla"):
         return raw
     return DEFAULT_POLICY_MODE
 

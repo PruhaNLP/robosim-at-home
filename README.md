@@ -2,13 +2,20 @@
 
 An end-to-end robot learning studio for the [SO-100](https://github.com/TheRobotStudio/SO-ARM100) arm.
 
-From teleop collection to reinforcement learning, one browser app covers the entire loop. Generate randomized scenes, collect data with a real leader arm, manage datasets, train **ACT** or **SmolVLA**, run online Flow-SDE **GRPO**, and evaluate policies. You have full control over objects, cameras, lighting, language instructions, and reward shaping — all sharing a single unified configuration and UI.
+From teleop collection to reinforcement learning, one browser app covers the entire loop. Generate randomized scenes, collect data with a real leader arm, manage datasets, train **ACT**, **SmolVLA** or **TurboVLA**, run online Flow-SDE **GRPO**, and evaluate policies. You have full control over objects, cameras, lighting, language instructions, and reward shaping — all sharing a single unified configuration and UI.
 
 ```bash
 robosim
 ```
 
 First launch downloads an asset pack, the demo ACT / SmolVLA checkpoints, and a 100-episode pick-and-place dataset, then opens [http://127.0.0.1:8000](http://127.0.0.1:8000).
+
+> [!NOTE]
+> **Updates**
+> - **2026-09-30** — [TurboVLA](https://arxiv.org/abs/2607.27205) mode (train / inference / eval) with the [PruhaNLP/TurboVLA-base](https://huggingface.co/PruhaNLP/TurboVLA-base) checkpoint.
+> - **2026-09-16** — GRPO and scene generation no longer leak RAM / VRAM on long runs.
+
+---
 
 <p align="center">
   <img src="docs/studio-inference.jpg" alt="Inference page with live front and wrist cameras">
@@ -24,14 +31,14 @@ First launch downloads an asset pack, the demo ACT / SmolVLA checkpoints, and a 
 | --- | --- |
 | **Collect data** | USB-detect and calibrate a SO-100 leader, spawn a scene, record front + wrist at a chosen Hz |
 | **Datasets** | Create a local repo, import from Hugging Face, watch episode video, edit the task text, delete, sync |
-| **Train** | ACT from scratch or continue a run. SmolVLA fine-tune, experts-only or full model. Multi-dataset, live loss |
+| **Train** | ACT from scratch or continue a run. SmolVLA fine-tune, experts-only or full model. TurboVLA fine-tune, vision trained or frozen. Multi-dataset, live loss |
 | **GRPO** | Online Flow-SDE on a SmolVLA SFT checkpoint. Group rollouts, live cameras, per-member rewards |
 | **Eval** | Build a fixed valset, reroll one scene, batch-score a checkpoint |
 | **Runs** | Open any SFT / GRPO folder under `data/train`, charts and checkpoints, delete a run |
 | **Inference** | New scene, pick a checkpoint, tune time / chunk / denoise / Hz, run a live test |
 | **Settings** | The domain randomizer: objects, table, tray, room, lights, physics, cameras, language, rewards, compute |
 
-Switch **SmolVLA ↔ ACT** in the header. GRPO and Eval stay hidden in ACT mode — ACT ignores language; the task string is a dataset label only.
+Switch **SmolVLA / ACT / TurboVLA** in the header. GRPO and Eval stay hidden in ACT mode — ACT ignores language; the task string is a dataset label only. TurboVLA reads the instruction and has Eval, but no GRPO: it regresses actions in one pass, while GRPO here is built on SmolVLA's flow sampling.
 
 ## Quick start
 
@@ -58,6 +65,8 @@ Both packs also pull:
 - [PruhaNLP/ACT-pickplace-blue-krill-demo](https://huggingface.co/PruhaNLP/ACT-pickplace-blue-krill-demo)
 - [PruhaNLP/pickplace-blue-krill-demo](https://huggingface.co/datasets/PruhaNLP/pickplace-blue-krill-demo)
 
+[PruhaNLP/TurboVLA-base](https://huggingface.co/PruhaNLP/TurboVLA-base) (~0.9 GB) is fetched on the first TurboVLA training run.
+
 Later launches skip the download and just start the container. If you installed Demo, it will offer the Full archive.
 
 Port defaults to `8000`. Override with `ROBOSIM_PORT`.
@@ -82,7 +91,7 @@ The starter set is [PruhaNLP/pickplace-blue-krill-demo](https://huggingface.co/d
 
 ## Train
 
-Pick a checkpoint (`act` from scratch, `lerobot/smolvla_base`, a local run, or any HF / folder path), tick the datasets, set epochs / batch / LR / save interval. SmolVLA can freeze the VLM and tune experts only. Progress, loss, LR, and throughput stream in the page.
+Pick a checkpoint (`act` from scratch, `lerobot/smolvla_base`, `PruhaNLP/TurboVLA-base`, a local run, or any HF / folder path), tick the datasets, set epochs / batch / LR / save interval. SmolVLA can freeze the VLM and tune experts only. TurboVLA trains everything except BERT, with its own vision LR, or freezes DINOv3 to save VRAM; on the demo set about 10 epochs are enough. Progress, loss, LR, and throughput stream in the page.
 
 <p align="center">
   <img src="docs/studio-train.jpg" alt="Train page: checkpoint, hyperparameters, dataset picker">
@@ -156,10 +165,10 @@ On top of that: FOV clamps per mount, position / look-at / roll jitter, wrist ji
 robosim          # installer + studio launcher
 ui/              # Vue studio + HTTP API
 sim/             # MuJoCo scene, cameras, language, rewards
-train_loop/      # ACT / SmolVLA SFT
+train_loop/      # SmolVLA SFT
 grpo/            # Flow-SDE GRPO
 eval/            # valset + batch eval
-model/           # inference
+model/           # inference, ACT and TurboVLA models + SFT, TurboVLA-base builder
 assets/          # robot, objects, rooms, table (from the pack)
 data/            # datasets, train runs, cache, scenes
 ```

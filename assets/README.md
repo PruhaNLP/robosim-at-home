@@ -6,19 +6,18 @@ tags:
 - mujoco
 - so100
 - assets
-pretty_name: RoboSim at Home assets (demo)
+pretty_name: RoboSim at Home assets (full)
 ---
 
-# RoboSim at Home — demo assets
+# RoboSim at Home — full assets
 
-The ACT training scene: robot, 6 objects, 1 HDRI, 1 table. Target vs distractor is chosen in the studio, not in this pack.
+Complete simulator pack: SO-ARM100, 20 table textures, 24 indoor rooms, 50 pick targets, and 980 scanned objects.
 
 ```bash
-hf download PruhaNLP/robosim-at-home-assets-demo robosim-at-home-assets-demo.tar.gz --repo-type dataset
-tar -xzf robosim-at-home-assets-demo.tar.gz
+hf download PruhaNLP/robosim-at-home-assets-full --repo-type dataset --local-dir assets
 ```
 
-Full pack: [PruhaNLP/robosim-at-home-assets-full](https://huggingface.co/datasets/PruhaNLP/robosim-at-home-assets-full)
+Smaller demo pack: [PruhaNLP/robosim-at-home-assets-demo](https://huggingface.co/datasets/PruhaNLP/robosim-at-home-assets-demo)
 
 See `assets.yaml` for the file list.
 

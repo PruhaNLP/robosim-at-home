@@ -129,6 +129,7 @@ def run_eval(
 ) -> dict:
     from grpo.policy import resolve_checkpoint
     from model.act import is_act_checkpoint
+    from model.turbovla import TurboEngine, is_turbovla_checkpoint
 
     manifest = load_manifest()
     scenes = list(manifest.get("scenes") or [])
@@ -136,10 +137,17 @@ def run_eval(
         raise RuntimeError("build a validation set first")
     resolved = resolve_checkpoint(checkpoint)
     if is_act_checkpoint(resolved):
-        raise RuntimeError("Eval batch is SmolVLA only.")
+        raise RuntimeError("Eval batch does not support ACT checkpoints.")
     cameras = policy_cameras_from_config(config)
-    engine = SmolVLAEngine(device=str(device))
-    engine.load(source=resolved, on_log=hooks.log, cameras=cameras or None, warmup=False)
+    if is_turbovla_checkpoint(resolved):
+        engine = TurboEngine(device=str(device))
+        engine.load(resolved, on_log=hooks.log)
+        if not engine.has_stats():
+            raise RuntimeError("TurboVLA base has no SO-100 stats yet; fine-tune it first")
+        engine.map_cameras(cameras)
+    else:
+        engine = SmolVLAEngine(device=str(device))
+        engine.load(source=resolved, on_log=hooks.log, cameras=cameras or None, warmup=False)
     runtime = dict(config)
     runtime["environment"] = dict(config["environment"])
     runtime["environment"]["rollout"] = dict(config["environment"]["rollout"])

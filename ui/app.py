@@ -2847,7 +2847,7 @@ def run_worker() -> None:
             wanted = resolve_model_device(requested)
             if requested not in ("auto", "cpu") and wanted == "cpu":
                 session.log("CUDA is not available, using CPU.")
-            if mode != "act":
+            if mode == "smolvla":
                 engine = inference.get_engine()
                 current = str(engine.device)
                 if current == "cuda":
@@ -2860,7 +2860,7 @@ def run_worker() -> None:
             session.log(
                 f"Device {wanted}, control {control_hz:g} Hz, "
                 f"view {int(message.get('fps') or 15)} FPS, "
-                f"checkpoint {message.get('checkpoint') or ('' if mode == 'act' else inference.MODEL_ID)}."
+                f"checkpoint {message.get('checkpoint') or (inference.MODEL_ID if mode == 'smolvla' else '')}."
             )
             if infer_viewer.metadata and infer_viewer.metadata.get("instruction"):
                 session.log(str(infer_viewer.metadata["instruction"]))
@@ -2906,6 +2906,22 @@ def run_worker() -> None:
                     from model.act import run_act_test
 
                     result = run_act_test(
+                        UI_SCENE_DIR,
+                        config,
+                        float(message["duration_seconds"]),
+                        int(message["n_action_steps"]),
+                        on_frames,
+                        session.stop.is_set,
+                        session.log,
+                        view_fps=float(message.get("fps") or 15),
+                        on_state=on_state,
+                        checkpoint=str(message.get("checkpoint") or ""),
+                        cameras=list(message.get("cameras") or []),
+                    )
+                elif mode == "turbovla":
+                    from model.turbovla import run_turbovla_test
+
+                    result = run_turbovla_test(
                         UI_SCENE_DIR,
                         config,
                         float(message["duration_seconds"]),

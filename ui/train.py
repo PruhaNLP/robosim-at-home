@@ -30,12 +30,17 @@ from devices import resolve_model_device
 REPO_ROOT = Path(__file__).resolve().parents[1]
 DEFAULT_POLICY = "lerobot/smolvla_base"
 DEFAULT_ACT_POLICY = "act"
+DEFAULT_TURBOVLA_POLICY = "PruhaNLP/TurboVLA-base"
 DEFAULT_EPOCHS = 20
 DEFAULT_BATCH = 8
 DEFAULT_LR = 1e-4
+DEFAULT_TURBOVLA_LR = 5e-5
+DEFAULT_TURBOVLA_VISION_LR = 5e-5
 DEFAULT_SAVE_EVERY = 1
 DEFAULT_RUN = "smolvla"
 DEFAULT_ACT_RUN = "act"
+DEFAULT_TURBOVLA_RUN = "turbovla"
+POLICY_MODES = ("smolvla", "act", "turbovla")
 DEFAULT_TUNE = "experts"
 DEFAULT_NUM_WORKERS = 4
 DEFAULT_BETA1 = 0.9
@@ -477,7 +482,7 @@ def _act_collect(
         frames += int(np.asarray(traj["action"]).shape[0])
         kept.append(item)
     if not kept:
-        raise RuntimeError("no ACT episodes with required cameras")
+        raise RuntimeError("no episodes with required cameras")
     return kept, frames, cameras
 
 
@@ -763,7 +768,7 @@ def _checkpoint_label(
 
 def _checkpoint_cameras(model_dir: Path) -> list[str]:
     cfg = _read_json(model_dir / "config.json")
-    if str(cfg.get("type") or "") == "act":
+    if str(cfg.get("type") or "") in ("act", "turbovla"):
         return [str(name) for name in (cfg.get("cameras") or []) if name]
     rename = {}
     for step in (_read_json(model_dir / "policy_preprocessor.json").get("steps") or []):
@@ -800,7 +805,7 @@ def _checkpoint_type(model_dir: Path) -> str:
         else:
             kind = str(data.get("type") or "")
         if kind:
-            return "act" if kind == "act" else "smolvla"
+            return kind if kind in POLICY_MODES else "smolvla"
     return "smolvla"
 
 
@@ -830,7 +835,14 @@ def _list_checkpoints() -> list[dict]:
             "kind": "hub",
             "type": "smolvla",
             "cameras": [],
-        }
+        },
+        {
+            "id": DEFAULT_TURBOVLA_POLICY,
+            "label": DEFAULT_TURBOVLA_POLICY,
+            "kind": "hub",
+            "type": "turbovla",
+            "cameras": list(CAMERA_ORDER),
+        },
     ]
     if not TRAIN_DIR.is_dir():
         return items
@@ -1109,6 +1121,8 @@ class TrainRuntime:
         self.save_every = DEFAULT_SAVE_EVERY
         self.run = DEFAULT_RUN
         self.tune = DEFAULT_TUNE
+        self.freeze_vision = False
+        self.vision_lr = DEFAULT_TURBOVLA_VISION_LR
         self.policy_mode = "smolvla"
         self.repo_ids: list[str] = []
         self.output_dir: str | None = None
@@ -1132,6 +1146,8 @@ class TrainRuntime:
                 "saveEvery": self.save_every,
                 "run": self.run,
                 "tune": self.tune,
+                "freezeVision": self.freeze_vision,
+                "visionLr": self.vision_lr,
                 "repoIds": list(self.repo_ids),
                 "outputDir": self.output_dir,
                 "error": self.error,
@@ -1262,13 +1278,13 @@ class TrainRuntime:
         with self.lock:
             if self.running:
                 raise RuntimeError("training is already running")
-            self.policy_mode = (
-                "act"
-                if str(payload.get("policy_mode") or "").strip().lower() == "act"
-                else "smolvla"
-            )
-            default_policy = DEFAULT_ACT_POLICY if self.policy_mode == "act" else DEFAULT_POLICY
-            default_run = DEFAULT_ACT_RUN if self.policy_mode == "act" else DEFAULT_RUN
+            mode = str(payload.get("policy_mode") or "").strip().lower()
+            self.policy_mode = mode if mode in POLICY_MODES else "smolvla"
+            default_policy, default_run = {
+                "smolvla": (DEFAULT_POLICY, DEFAULT_RUN),
+                "act": (DEFAULT_ACT_POLICY, DEFAULT_ACT_RUN),
+                "turbovla": (DEFAULT_TURBOVLA_POLICY, DEFAULT_TURBOVLA_RUN),
+            }[self.policy_mode]
             self.policy = _resolve_sft_policy(
                 str(payload.get("policy") or default_policy).strip(),
                 self.policy_mode,
@@ -1278,7 +1294,10 @@ class TrainRuntime:
             self.epochs = max(1, int(payload.get("epochs") or DEFAULT_EPOCHS))
             self.steps = 0
             self.batch = max(1, int(payload.get("batch") or DEFAULT_BATCH))
-            self.lr = max(1e-8, float(payload.get("lr") or DEFAULT_LR))
+            default_lr = DEFAULT_TURBOVLA_LR if self.policy_mode == "turbovla" else DEFAULT_LR
+            self.lr = max(1e-8, float(payload.get("lr") or default_lr))
+            self.freeze_vision = bool(payload.get("freeze_vision", False))
+            self.vision_lr = max(1e-8, float(payload.get("vision_lr") or DEFAULT_TURBOVLA_VISION_LR))
             self.save_every = max(0, int(payload.get("save_every") or payload.get("saveEvery") or 0))
             if "save_every" not in payload and "saveEvery" not in payload:
                 self.save_every = DEFAULT_SAVE_EVERY
@@ -1337,17 +1356,24 @@ class TrainRuntime:
     def _run(self, store, compute: dict, training: dict) -> None:
         try:
             output = TRAIN_DIR / self.run
+            direct = self.policy_mode in ("act", "turbovla")
             if output.exists():
-                if self.policy_mode == "act" and not _run_has_weights(output):
+                if direct and not _run_has_weights(output):
                     self.log(f"Replace unfinished run {output}.", "warn")
                     shutil.rmtree(output)
                 else:
                     raise RuntimeError(f"run exists: {output}")
-            if self.policy_mode == "act":
+            if direct:
                 import torch
 
-                from model.act import run_act_sft
+                if self.policy_mode == "act":
+                    from model.act import run_act_sft as run_sft
 
+                    label = "ACT"
+                else:
+                    from model.turbovla import run_turbovla_sft as run_sft
+
+                    label = "TurboVLA"
                 episodes, frames, cameras = _act_collect(
                     store,
                     self.repo_ids,
@@ -1371,7 +1397,7 @@ class TrainRuntime:
                     self.output_dir = stored_path(output)
                 self._set_progress("prepare", 0, len(episodes), "Load collect episodes")
                 self.log(
-                    f"ACT SFT · {len(episodes)} episodes · {frames} frames · "
+                    f"{label} SFT · {len(episodes)} episodes · {frames} frames · "
                     f"no LeRobot convert · batch {self.batch} → {steps} steps."
                 )
                 if self.policy.lower() in {"act", "lerobot/act"}:
@@ -1383,21 +1409,33 @@ class TrainRuntime:
                     with self.lock:
                         return not self.running
 
-                run_act_sft(
-                    episodes,
-                    output,
-                    torch.device(policy_device),
-                    self.epochs,
-                    self.batch,
-                    self.lr,
-                    self.save_every,
-                    self.policy,
-                    cameras,
-                    self.log,
-                    self._set_progress,
-                    should_stop,
-                    training=training,
-                )
+                try:
+                    run_sft(
+                        episodes,
+                        output,
+                        torch.device(policy_device),
+                        self.epochs,
+                        self.batch,
+                        self.lr,
+                        self.save_every,
+                        self.policy,
+                        cameras,
+                        self.log,
+                        self._set_progress,
+                        should_stop,
+                        training=training,
+                        **(
+                            {"freeze_vision": self.freeze_vision, "vision_lr": self.vision_lr}
+                            if self.policy_mode == "turbovla"
+                            else {}
+                        ),
+                    )
+                finally:
+                    import gc
+
+                    gc.collect()
+                    if torch.cuda.is_available():
+                        torch.cuda.empty_cache()
                 if should_stop():
                     self.log("Stopped.", "warn")
                     return

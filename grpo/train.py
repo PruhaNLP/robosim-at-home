@@ -325,8 +325,8 @@ def run_grpo(
     from core.config import normalize_policy_mode
 
     mode = normalize_policy_mode(config.get("policy_mode"))
-    if mode == "act":
-        raise RuntimeError("GRPO is not available in ACT mode.")
+    if mode != "smolvla":
+        raise RuntimeError(f"GRPO is not available in {mode} mode.")
     cameras = policy_cameras_from_config(config)
     hooks.log(f"Load custom SmolVLA loop {checkpoint} on {device}.")
     engine, resolved = load_engine(

@@ -23,7 +23,7 @@
           <span class="nav-count" v-if="state.dataset.episodes?.length">{{ state.dataset.episodes.length }}</span>
         </a>
         <a href="#train" :class="{ active: state.page === 'train' }">Train</a>
-        <a href="#grpo" v-if="!isAct()" :class="{ active: state.page === 'grpo' }">GRPO</a>
+        <a href="#grpo" v-if="hasGrpo()" :class="{ active: state.page === 'grpo' }">GRPO</a>
         <a href="#eval" v-if="!isAct()" :class="{ active: state.page === 'eval' }">Eval</a>
         <a href="#runs" :class="{ active: state.page === 'runs' }">
           Runs
@@ -42,6 +42,7 @@
           >
             <option value="smolvla">SmolVLA</option>
             <option value="act">ACT</option>
+            <option value="turbovla">TurboVLA</option>
           </select>
         </label>
         <p class="status">{{ statusText() }}</p>
@@ -316,12 +317,12 @@
 
       <section class="page train-page" :class="{ hidden: state.page !== 'train' }">
         <div class="scene-bar">
-          <p>{{ isAct() ? "Train ACT from scratch or continue a local / Hugging Face checkpoint." : "Fine-tune SmolVLA from a local or Hugging Face checkpoint." }}</p>
+          <p>{{ isAct() ? "Train ACT from scratch or continue a local / Hugging Face checkpoint." : isTurbo() ? "Fine-tune TurboVLA (DINOv3 + BERT, no LLM) from PruhaNLP/TurboVLA-base or a saved run. BERT stays frozen." : "Fine-tune SmolVLA from a local or Hugging Face checkpoint." }}</p>
         </div>
         <div class="test-panel">
           <label class="test-field wide">
             <span>Checkpoint</span>
-            <small>{{ isAct() ? "From scratch, a saved ACT run, or a custom HF / local folder." : "Local run, lerobot/smolvla_base, or a custom HF / local folder." }}</small>
+            <small>{{ isAct() ? "From scratch, a saved ACT run, or a custom HF / local folder." : isTurbo() ? "PruhaNLP/TurboVLA-base, a saved TurboVLA run, or a custom HF / local folder." : "Local run, lerobot/smolvla_base, or a custom HF / local folder." }}</small>
             <select
               :value="trainPolicySelect()"
               :disabled="state.train.running"
@@ -357,9 +358,22 @@
             <input type="number" min="1" step="1" v-model.number="state.train.batch" :disabled="state.train.running">
           </label>
           <label class="test-field">
-            <span>LR</span>
-            <small>AdamW peak learning rate.</small>
+            <span>{{ isTurbo() ? "Head LR" : "LR" }}</span>
+            <small>{{ isTurbo() ? "Fusion, projections, action decoder. Paper: 5e-5." : "AdamW peak learning rate." }}</small>
             <input type="number" min="0" step="any" v-model.number="state.train.lr" :disabled="state.train.running">
+          </label>
+          <label class="test-field" v-if="isTurbo()">
+            <span>Vision</span>
+            <small>DINOv3 backbone. Frozen saves VRAM and trains faster.</small>
+            <select v-model="state.train.freezeVision" :disabled="state.train.running">
+              <option :value="false">Train</option>
+              <option :value="true">Freeze</option>
+            </select>
+          </label>
+          <label class="test-field" v-if="isTurbo()">
+            <span>Vision LR</span>
+            <small>DINOv3 peak learning rate. Paper: 5e-5.</small>
+            <input type="number" min="0" step="any" v-model.number="state.train.visionLr" :disabled="state.train.running || state.train.freezeVision">
           </label>
           <label class="test-field">
             <span>Save every</span>
@@ -371,7 +385,7 @@
             <small>New folder name under data/train. This is the name that is saved and later shown in GRPO / Inference.</small>
             <input type="text" v-model="state.train.run" :disabled="state.train.running">
           </label>
-          <label class="test-field wide" v-if="!isAct()">
+          <label class="test-field wide" v-if="hasGrpo()">
             <span>Tune</span>
             <small>SmolVLA parts to update.</small>
             <select v-model="state.train.tune" :disabled="state.train.running">
@@ -445,7 +459,7 @@
         </div>
       </section>
 
-      <section class="page grpo-page" :class="{ hidden: isAct() || state.page !== 'grpo' }">
+      <section class="page grpo-page" :class="{ hidden: !hasGrpo() || state.page !== 'grpo' }">
         <div class="scene-bar">
           <p>{{ state.grpo.scene?.instruction || "Online Flow-SDE GRPO. Loads an SFT checkpoint, rolls out groups in the sim, and updates the flow policy." }}</p>
         </div>
@@ -677,7 +691,7 @@
               :disabled="state.eval.running || state.eval.building"
             >
           </label>
-          <label class="test-field">
+          <label class="test-field" v-if="!isTurbo()">
             <span>Denoise</span>
             <small>ODE flow steps. Same as Inference.</small>
             <input type="number" min="1" max="20" step="1" v-model.number="state.eval.numSteps" :disabled="state.eval.running || state.eval.building">
@@ -685,7 +699,7 @@
           <label class="test-field">
             <span>Chunk</span>
             <small>Actions from each infer.</small>
-            <input type="number" min="1" max="50" step="1" v-model.number="state.eval.nActionSteps" :disabled="state.eval.running || state.eval.building">
+            <input type="number" min="1" :max="chunkMax()" step="1" v-model.number="state.eval.nActionSteps" :disabled="state.eval.running || state.eval.building">
           </label>
           <button
             type="button"
@@ -858,7 +872,7 @@
         <div class="test-panel">
           <label class="test-field wide">
             <span>Checkpoint</span>
-            <small>{{ isAct() ? "Trained ACT checkpoint." : "Your inference loop loads this policy." }}</small>
+            <small>{{ isAct() ? "Trained ACT checkpoint." : isTurbo() ? "Fine-tuned TurboVLA run. The base has no SO-100 stats yet." : "Your inference loop loads this policy." }}</small>
             <select v-model="state.test.checkpoint" :disabled="state.test.running">
               <option v-for="item in state.test.checkpoints" :key="item.id" :value="item.id">
                 {{ item.label }}
@@ -872,17 +886,17 @@
           </label>
           <label class="test-field">
             <span>Chunk</span>
-            <small>Actions taken from each model chunk before the next infer.</small>
-            <input type="number" min="1" max="50" step="1" v-model.number="state.test.nActionSteps">
+            <small>Actions taken from each model chunk before the next infer. Max {{ chunkMax() }}.</small>
+            <input type="number" min="1" :max="chunkMax()" step="1" v-model.number="state.test.nActionSteps">
           </label>
-          <label class="test-field" v-if="!isAct()">
+          <label class="test-field" v-if="hasGrpo()">
             <span>Denoise</span>
             <small>Flow-matching steps. Fewer is faster, more is stabler.</small>
             <input type="number" min="1" max="20" step="1" v-model.number="state.test.numSteps">
           </label>
           <label class="test-field">
             <span>Control Hz</span>
-            <small>How often the model and the simulator take a step.</small>
+            <small>How often the model and the simulator take a step. Keep it at the dataset fps (15 for the demo set).</small>
             <input type="number" min="1" max="50" step="1" v-model.number="state.test.controlHz">
           </label>
           <label class="test-field">
@@ -893,7 +907,7 @@
           <button
             type="button"
             class="primary test-run"
-            :disabled="state.infer.building || !state.infer.scene || (isAct() && !state.test.checkpoint)"
+            :disabled="state.infer.building || !state.infer.scene || (!hasGrpo() && !state.test.checkpoint)"
             @click="state.test.running ? stopTest() : runTest()"
           >
             {{ state.test.running ? "Stop" : "Run test" }}

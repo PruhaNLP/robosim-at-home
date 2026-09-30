@@ -10,6 +10,12 @@ const RUNTIME_POLL_MS = 500;
 const DEFAULT_TRAIN_BATCH = 8;
 const CUSTOM_TRAIN_POLICY = "__custom__";
 const SMOLVLA_MAX_CAMERAS = 5;
+const MODE_DEFAULTS = {
+  smolvla: { policy: "lerobot/smolvla_base", run: "smolvla", label: "SmolVLA", lr: 1e-4, chunk: 50 },
+  act: { policy: "act", run: "act", label: "ACT", lr: 1e-4, chunk: 50 },
+  turbovla: { policy: "PruhaNLP/TurboVLA-base", run: "turbovla", label: "TurboVLA", lr: 5e-5, chunk: 12 },
+};
+const TURBOVLA_VISION_LR = 5e-5;
 const API_TIMEOUT_MS = 45000;
 const API_LONG_MS = 180000;
 // ======Settings=========
@@ -131,6 +137,8 @@ createApp({
         saveEvery: 1,
         run: "smolvla",
         tune: "experts",
+        freezeVision: false,
+        visionLr: TURBOVLA_VISION_LR,
         repoIds: [],
         running: false,
         error: null,
@@ -348,12 +356,33 @@ createApp({
       commit(path, next);
     }
 
+    function policyMode() {
+      const mode = state.config?.policy_mode;
+      return MODE_DEFAULTS[mode] ? mode : "smolvla";
+    }
+
     function isAct() {
-      return (state.config?.policy_mode || "smolvla") === "act";
+      return policyMode() === "act";
+    }
+
+    function isTurbo() {
+      return policyMode() === "turbovla";
+    }
+
+    function hasGrpo() {
+      return policyMode() === "smolvla";
+    }
+
+    function chunkMax() {
+      return MODE_DEFAULTS[policyMode()].chunk;
+    }
+
+    function chunkSteps(value) {
+      return Math.min(Math.max(1, Number(value) || chunkMax()), chunkMax());
     }
 
     function trainPolicies() {
-      const mode = isAct() ? "act" : "smolvla";
+      const mode = policyMode();
       return (state.test.allCheckpoints || []).filter((item) => (item.type || "smolvla") === mode);
     }
 
@@ -421,31 +450,32 @@ createApp({
     }
 
     function setPolicyMode(mode) {
-      const next = mode === "act" ? "act" : "smolvla";
+      const next = MODE_DEFAULTS[mode] ? mode : "smolvla";
       const policy = String(state.train.policy || "").trim();
       const item = (state.test.allCheckpoints || []).find((entry) => entry.id === policy);
-      if (next === "act") {
-        if (policy === "lerobot/smolvla_base" || (item && item.type !== "act")) {
-          state.train.policy = "act";
-          state.train.custom = false;
-        }
-        if (state.train.run === "smolvla") state.train.run = "act";
-        if (state.page === "grpo" || state.page === "eval") location.hash = "train";
-        if (state.section === "grpo" || state.section === "eval") state.section = "training";
-      } else {
-        if (policy === "act" || policy === "lerobot/act" || (item && item.type === "act")) {
-          state.train.policy = "lerobot/smolvla_base";
-          state.train.custom = false;
-        }
-        if (state.train.run === "act") state.train.run = "smolvla";
+      const type = item ? item.type || "smolvla" : (policy === "act" || policy === "lerobot/act" ? "act" : null);
+      if (type !== next && !(type === null && state.train.custom)) {
+        state.train.policy = MODE_DEFAULTS[next].policy;
+        state.train.custom = false;
+      }
+      if (Object.values(MODE_DEFAULTS).some((entry) => entry.run === state.train.run)) {
+        state.train.run = MODE_DEFAULTS[next].run;
+      }
+      if (Number(state.train.lr) === MODE_DEFAULTS[policyMode()].lr) state.train.lr = MODE_DEFAULTS[next].lr;
+      if (next !== "smolvla") {
+        const hidden = next === "act" ? ["grpo", "eval"] : ["grpo"];
+        if (hidden.includes(state.page)) location.hash = "train";
+        if (hidden.includes(state.section)) state.section = "training";
       }
       commit(["policy_mode"], next);
+      state.test.nActionSteps = MODE_DEFAULTS[next].chunk;
+      state.eval.nActionSteps = MODE_DEFAULTS[next].chunk;
       applyCheckpoints(state.test.allCheckpoints.length ? state.test.allCheckpoints : state.test.checkpoints);
       syncActTrainForm();
     }
 
     function settingsNav() {
-      return SETTINGS_NAV.filter((item) => !isAct() || (item.id !== "grpo" && item.id !== "eval"));
+      return SETTINGS_NAV.filter((item) => (hasGrpo() || item.id !== "grpo") && (!isAct() || item.id !== "eval"));
     }
 
     function vec3List(path) {
@@ -1043,7 +1073,7 @@ createApp({
       if (state.collect.building || state.infer.building) return "Building…";
       if (state.collect.busy && state.collect.step !== "ready") return "Working…";
       if (state.test.running) {
-        if (state.test.phase === "loading") return isAct() ? "Loading ACT…" : "Loading SmolVLA…";
+        if (state.test.phase === "loading") return `Loading ${MODE_DEFAULTS[policyMode()].label}…`;
         if (state.test.phase === "running") return "Running test…";
         return "Starting test…";
       }
@@ -1151,6 +1181,8 @@ createApp({
             if (train.saveEvery != null) state.train.saveEvery = train.saveEvery;
             if (train.run) state.train.run = train.run;
             if (train.tune) state.train.tune = train.tune;
+            if (train.freezeVision != null) state.train.freezeVision = Boolean(train.freezeVision);
+            if (train.visionLr) state.train.visionLr = train.visionLr;
             if (Array.isArray(train.repoIds)) state.train.repoIds = train.repoIds;
           }
           if (trainWasRunning && !running) {
@@ -2038,11 +2070,11 @@ createApp({
           method: "POST",
           body: JSON.stringify({
             checkpoint: state.eval.checkpoint,
-            policy_mode: "smolvla",
+            policy_mode: policyMode(),
             duration_seconds: Number(state.eval.duration) || 40,
             parallel: Math.max(1, Number(state.eval.parallel) || 1),
             num_steps: Number(state.eval.numSteps) || 10,
-            n_action_steps: Number(state.eval.nActionSteps) || 50,
+            n_action_steps: chunkSteps(state.eval.nActionSteps),
           }),
         });
         applySnapshot(payload, { drafts: true });
@@ -2115,8 +2147,8 @@ createApp({
     }
 
     async function startGrpo() {
-      if (isAct()) {
-        state.status = "GRPO is not available in ACT mode";
+      if (!hasGrpo()) {
+        state.status = `GRPO is not available in ${MODE_DEFAULTS[policyMode()].label} mode`;
         return;
       }
       try {
@@ -2189,7 +2221,7 @@ createApp({
     function applyCheckpoints(items) {
       if (!Array.isArray(items)) return;
       state.test.allCheckpoints = items;
-      const mode = isAct() ? "act" : "smolvla";
+      const mode = policyMode();
       const visible = items.filter((item) => (item.type || "smolvla") === mode);
       state.test.checkpoints = visible;
       if (!visible.some((item) => item.id === state.test.checkpoint)) {
@@ -2224,13 +2256,15 @@ createApp({
           method: "POST",
           body: JSON.stringify({
             policy,
-            policy_mode: isAct() ? "act" : "smolvla",
+            policy_mode: policyMode(),
             epochs: Number(state.train.epochs) || 20,
             batch: Number(state.train.batch) || DEFAULT_TRAIN_BATCH,
             lr: Number(state.train.lr) || 0.0001,
             save_every: Number(state.train.saveEvery) || 0,
             run: act ? act.run : state.train.run,
             tune: state.train.tune,
+            freeze_vision: Boolean(state.train.freezeVision),
+            vision_lr: Number(state.train.visionLr) || TURBOVLA_VISION_LR,
             repo_ids: state.train.repoIds,
           }),
         });
@@ -2266,12 +2300,12 @@ createApp({
           method: "POST",
           body: JSON.stringify({
             duration_seconds: Number(state.test.duration) || 20,
-            n_action_steps: Number(state.test.nActionSteps) || 50,
+            n_action_steps: chunkSteps(state.test.nActionSteps),
             num_steps: Number(state.test.numSteps) || 10,
             control_hz: Number(state.test.controlHz) || 15,
             fps: Number(state.test.viewFps) || 15,
             checkpoint: state.test.checkpoint,
-            policy_mode: isAct() ? "act" : "smolvla",
+            policy_mode: policyMode(),
           }),
         });
         applySnapshot(payload);
@@ -2309,7 +2343,7 @@ createApp({
     function showPage() {
       const previous = state.page;
       state.page = pageFromHash();
-      if (isAct() && (state.page === "grpo" || state.page === "eval")) {
+      if ((!hasGrpo() && state.page === "grpo") || (isAct() && state.page === "eval")) {
         location.hash = "train";
         return;
       }
@@ -2365,8 +2399,16 @@ createApp({
       try {
         const payload = await api("/api/state?full=1");
         applySnapshot(payload, { boot: true });
-        if (isAct() && (state.section === "grpo" || state.section === "eval")) state.section = "training";
+        if ((!hasGrpo() && state.section === "grpo") || (isAct() && state.section === "eval")) state.section = "training";
         syncActTrainForm();
+        state.test.nActionSteps = chunkSteps(state.test.nActionSteps);
+        state.eval.nActionSteps = chunkSteps(state.eval.nActionSteps);
+        if (isTurbo() && !state.train.running) {
+          if (Number(state.train.lr) === MODE_DEFAULTS.smolvla.lr) state.train.lr = MODE_DEFAULTS.turbovla.lr;
+          if (Object.values(MODE_DEFAULTS).some((entry) => entry.run === state.train.run)) {
+            state.train.run = MODE_DEFAULTS.turbovla.run;
+          }
+        }
         if (state.collect.record.repoId) state.dataset.repoId = state.collect.record.repoId;
         if (
           !state.train.running
@@ -2398,6 +2440,9 @@ createApp({
       state,
       statusText,
       isAct,
+      isTurbo,
+      hasGrpo,
+      chunkMax,
       setPolicyMode,
       trainPolicies,
       trainPolicySelect,
